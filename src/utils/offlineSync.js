@@ -306,10 +306,12 @@ export async function smartSaveState(updatedState, options = {}) {
   // 1. بث التغيير لكافة التبويبات فورياً في نفس الجهاز (0ms Instant Local Broadcast)
   broadcastStateChange(cleanUpdated);
 
-  // 2. تحديث الكاش المحلي في IndexedDB فورياً بدون تعطيل الواجهة
-  saveStateLocally(cleanUpdated).catch((err) => {
-    console.warn('[Sync] Local storage async write warning:', err);
-  });
+  // 2. تحديث الكاش المحلي في IndexedDB فورياً قبل أي تراجع
+  try {
+    await saveStateLocally(cleanUpdated);
+  } catch (err) {
+    console.warn('[Sync] Local storage write warning:', err);
+  }
 
   // إذا طلب العميل صراحة الانتظار المتزامن للسيرفر (مثل عمليات تصفير النظام الحساسة)
   if (waitForServer) {
@@ -687,9 +689,10 @@ export async function smartLoadState(options = {}) {
       
       if (remoteData && !remoteData.notModified) {
         const normalized = normalizeState(remoteData);
-        // حفظ الحالة السحابية النظيفة في التخزين المحلي لتحديثه فوراً
-        await saveStateLocally(normalized);
-        return { data: normalized, source: 'cloud' };
+        // دمج ذكي مع الكاش المحلي لحصانة القرارات الباتة (Terminal Decision Immunity) ومنع ارتداد الموافقات أو الرفض عند إعادة التحميل
+        const finalMerged = localCache ? smartMergeStates(localCache, normalized) : normalized;
+        await saveStateLocally(finalMerged);
+        return { data: finalMerged, source: 'cloud' };
       }
     } catch (e) {
       console.warn('[Sync] Cloud fetch attempt failed, falling back to local storage:', e.message);

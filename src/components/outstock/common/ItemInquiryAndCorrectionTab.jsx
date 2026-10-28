@@ -30,18 +30,25 @@ import {
   Coins,
   CreditCard,
   Layers,
-  Sparkle
+  Sparkle,
+  Trash2,
+  CheckCircle,
+  FileEdit,
+  PackagePlus
 } from 'lucide-react';
 import {
   outstockGetMedicationRequests,
   outstockCreateMedicationRequest,
   outstockReplyMedicationRequest,
   outstockApproveNewItemRequest,
+  outstockUpdateMedicationDetails,
   outstockSearchMedications,
   outstockSendInquiryComplaint,
   outstockGetCustomers,
   outstockSendMedicationRequestWhatsApp,
-  outstockConvertMedicationRequestToOrder
+  outstockConvertMedicationRequestToOrder,
+  outstockMarkMedicationRequestsRead,
+  outstockMarkMedicationRequestRead
 } from '../../../utils/outstockApiClient';
 import MedicationAutocompleteInput from '../pharmacy/MedicationAutocompleteInput';
 import NewCustomerOrderModal from '../pharmacy/NewCustomerOrderModal';
@@ -94,6 +101,44 @@ export default function ItemInquiryAndCorrectionTab({
   const [attachmentImage, setAttachmentImage] = useState(null); // base64 string
   const [attachmentName, setAttachmentName] = useState('');
   const [previewImageUrl, setPreviewImageUrl] = useState(null); // Lightbox
+  const defaultCorrectionFields = {
+    trade_name_en: '',
+    trade_name_ar: '',
+    invoice_display_name: '',
+    public_price: '',
+    dosage_form: '',
+    pack_size: 1,
+    unit_name: 'علبة',
+    strength: '',
+    active_ingredient: '',
+    manufacturer: '',
+    barcode: '',
+    brand: '',
+    category: '',
+    skin_type: '',
+    size_volume: ''
+  };
+
+  const defaultNewItemCard = {
+    item_type: 'medication',
+    trade_name_en: '',
+    trade_name_ar: '',
+    invoice_display_name: '',
+    dosage_form: 'أقراص',
+    pack_size: 1,
+    unit_name: 'علبة',
+    strength: '',
+    active_ingredient: '',
+    public_price: '',
+    manufacturer: '',
+    barcode: '',
+    storage_condition: 'room_temp',
+    brand: '',
+    category: 'عناية بالبشرة',
+    skin_type: 'جميع أنواع البشرة',
+    size_volume: ''
+  };
+
   const [proposedData, setProposedData] = useState({
     public_price: '',
     pack_size: 1,
@@ -102,6 +147,9 @@ export default function ItemInquiryAndCorrectionTab({
     active_ingredient: '',
     invoice_display_name: ''
   });
+  const [correctionOldValues, setCorrectionOldValues] = useState(defaultCorrectionFields);
+  const [correctionNewValues, setCorrectionNewValues] = useState(defaultCorrectionFields);
+  const [newItemCard, setNewItemCard] = useState(defaultNewItemCard);
   const [isSubmitting, setIsSubmitting] = useState(false);
 
   // ── قائمة المناطق المعتمدة من إعدادات المالك ──
@@ -137,6 +185,9 @@ export default function ItemInquiryAndCorrectionTab({
     setPaymentMethod('cash');
     setRequestedQuantity(1);
     setRequestedUnit('pack');
+    setCorrectionOldValues(defaultCorrectionFields);
+    setCorrectionNewValues(defaultCorrectionFields);
+    setNewItemCard(defaultNewItemCard);
     setProposedData({
       public_price: '',
       pack_size: 1,
@@ -158,6 +209,10 @@ export default function ItemInquiryAndCorrectionTab({
   const [replyStatus, setReplyStatus] = useState('resolved');
   const [replyItems, setReplyItems] = useState([]);
   const [isReplying, setIsReplying] = useState(false);
+  const [correctionRejectionReason, setCorrectionRejectionReason] = useState('');
+  const [correctionEditableNewVals, setCorrectionEditableNewVals] = useState(null);
+  const [newItemReplyData, setNewItemReplyData] = useState(null);
+  const [showRejectBox, setShowRejectBox] = useState(false);
 
   // المصادقة الأمنية بكود الموظف قبل تحويل الاستعلام لطلب عميل
   const [isConvertAuthModalOpen, setIsConvertAuthModalOpen] = useState(false);
@@ -191,6 +246,18 @@ export default function ItemInquiryAndCorrectionTab({
       const res = await outstockGetMedicationRequests(params);
       if (res?.success && Array.isArray(res.requests)) {
         setRequests(res.requests);
+        // للفرع: إذا وجدت استعلامات تم الرد عليها ولم تُعلم كمقروءة، تعليمها كمقروءة وإسقاط الإشعار الوهمي
+        if (!isProcurement && branchId) {
+          const hasUnreadReplies = res.requests.some(r =>
+            (r.status === 'resolved' || r.status === 'approved' || r.status === 'replied') &&
+            (r.is_read_by_branch === false || r.is_read_by_branch === null || r.is_read_by_branch === undefined)
+          );
+          if (hasUnreadReplies) {
+            outstockMarkMedicationRequestsRead(branchId).then(() => {
+              window.dispatchEvent(new CustomEvent('outstock:refresh_notifications'));
+            }).catch(() => {});
+          }
+        }
       } else {
         setRequests([]);
       }
@@ -268,14 +335,91 @@ export default function ItemInquiryAndCorrectionTab({
   // إرسال طلب جديد
   const handleCreateRequest = async (e) => {
     e.preventDefault();
-    if (!medicationName.trim()) {
-      showToast('⚠️ يرجى إدخال اسم الدواء أو الصنف');
-      return;
-    }
 
-    if (customerPhone && customerPhone.length > 0 && customerPhone.length < 11) {
-      showToast('⚠️ رقم هاتف العميل يجب أن يتكون من 11 رقماً');
-      return;
+    let finalMedicationName = medicationName.trim();
+    let finalProposedData = null;
+
+    if (newRequestType === 'inquiry') {
+      if (!finalMedicationName) {
+        showToast('⚠️ يرجى إدخال اسم الدواء أو الصنف المستعلم عنه');
+        return;
+      }
+      if (customerPhone && customerPhone.length > 0 && customerPhone.length < 11) {
+        showToast('⚠️ رقم هاتف العميل يجب أن يتكون من 11 رقماً');
+        return;
+      }
+    } else if (newRequestType === 'correction') {
+      if (!selectedMed) {
+        showToast('⚠️ يرجى اختيار الصنف المراد تصحيح بياناته من قائمة الأصناف المسجلة');
+        return;
+      }
+      if (!notes.trim()) {
+        showToast('⚠️ يرجى كتابة سبب طلب تصحيح بيانات الصنف لتوثيقه لإدارة المشتريات');
+        return;
+      }
+      finalMedicationName = selectedMed.trade_name || selectedMed.tradeName || selectedMed.name || finalMedicationName;
+
+      // حساب الفروقات فقط
+      const diff = {};
+      Object.keys(correctionNewValues).forEach((key) => {
+        const oldV = String(correctionOldValues[key] ?? '').trim();
+        const newV = String(correctionNewValues[key] ?? '').trim();
+        if (newV && newV !== oldV) {
+          diff[key] = { old: oldV, new: newV };
+        }
+      });
+
+      finalProposedData = {
+        item_type: itemType,
+        old_values: correctionOldValues,
+        new_values: correctionNewValues,
+        diff,
+        public_price: correctionNewValues.public_price,
+        pack_size: correctionNewValues.pack_size,
+        dosage_form: correctionNewValues.dosage_form,
+        manufacturer: correctionNewValues.manufacturer,
+        active_ingredient: correctionNewValues.active_ingredient,
+        invoice_display_name: correctionNewValues.invoice_display_name,
+        barcode: correctionNewValues.barcode
+      };
+    } else if (newRequestType === 'new_item') {
+      if (itemType === 'medication') {
+        if (!newItemCard.trade_name_en.trim()) {
+          showToast('⚠️ يرجى إدخال الاسم التجاري الإنجليزي للصنف الدوائي');
+          return;
+        }
+        if (!newItemCard.public_price || parseFloat(newItemCard.public_price) <= 0) {
+          showToast('⚠️ يرجى إدخال السعر الرسمي للجمهور');
+          return;
+        }
+        finalMedicationName = newItemCard.trade_name_en.trim();
+      } else {
+        if (!newItemCard.trade_name_ar.trim() && !newItemCard.trade_name_en.trim()) {
+          showToast('⚠️ يرجى إدخال اسم منتج التجميل');
+          return;
+        }
+        if (!newItemCard.brand.trim()) {
+          showToast('⚠️ يرجى إدخال اسم الماركة أو البراند');
+          return;
+        }
+        if (!newItemCard.public_price || parseFloat(newItemCard.public_price) <= 0) {
+          showToast('⚠️ يرجى إدخال السعر الرسمي للجمهور');
+          return;
+        }
+        finalMedicationName = newItemCard.trade_name_ar.trim() || newItemCard.trade_name_en.trim();
+      }
+
+      finalProposedData = {
+        ...newItemCard,
+        tradeName: newItemCard.trade_name_en,
+        arabicName: newItemCard.trade_name_ar,
+        price: newItemCard.public_price,
+        dosageForm: newItemCard.dosage_form,
+        packSize: newItemCard.pack_size,
+        unitName: newItemCard.unit_name,
+        activeIngredients: newItemCard.active_ingredient,
+        company: newItemCard.manufacturer
+      };
     }
 
     setIsSubmitting(true);
@@ -284,39 +428,47 @@ export default function ItemInquiryAndCorrectionTab({
         branchId: branchId || currentBranch?.id || null,
         requestType: newRequestType,
         medicationId: selectedMed?.id || null,
-        medicationName: medicationName.trim(),
-        proposedData: newRequestType !== 'inquiry' ? proposedData : null,
+        medicationName: finalMedicationName,
+        proposedData: finalProposedData,
+        requestedData: finalProposedData,
         notes: notes.trim(),
+        pharmacistNotes: notes.trim(),
         requestedBy: authenticatedEmployee?.name || currentUser?.name || currentUser?.full_name || 'صيدلي الفرع',
         employeeCode: authenticatedEmployee?.code || null,
         employeeName: authenticatedEmployee?.name || null,
         attachmentUrl: attachmentImage || null,
         attachmentName: attachmentName || null,
         itemType,
-        customerName: customerName.trim() || null,
-        customerPhone: customerPhone.trim() || null,
-        customerAddress: customerZone ? (customerAddress.trim() ? `${customerZone} - ${customerAddress.trim()}` : customerZone) : (customerAddress.trim() || null),
-        customerZone: customerZone.trim() || null,
-        customerId: customerId || null,
-        depositAmount: parseFloat(depositAmount) || 0,
-        paymentMethod,
-        requestedQuantity: parseInt(requestedQuantity, 10) || 1,
-        requestedUnit
+        customerName: newRequestType === 'inquiry' ? (customerName.trim() || null) : null,
+        customerPhone: newRequestType === 'inquiry' ? (customerPhone.trim() || null) : null,
+        customerAddress: newRequestType === 'inquiry' ? (customerZone ? (customerAddress.trim() ? `${customerZone} - ${customerAddress.trim()}` : customerZone) : (customerAddress.trim() || null)) : null,
+        customerZone: newRequestType === 'inquiry' ? (customerZone.trim() || null) : null,
+        customerId: newRequestType === 'inquiry' ? (customerId || null) : null,
+        depositAmount: newRequestType === 'inquiry' ? (parseFloat(depositAmount) || 0) : 0,
+        paymentMethod: newRequestType === 'inquiry' ? paymentMethod : 'cash',
+        requestedQuantity: newRequestType === 'inquiry' ? (parseInt(requestedQuantity, 10) || 1) : 1,
+        requestedUnit: newRequestType === 'inquiry' ? requestedUnit : 'pack'
       };
 
       const res = await outstockCreateMedicationRequest(payload);
       if (res?.success) {
-        showToast('✅ تم إرسال الطلب لإدارة المشتريات بنجاح!');
+        showToast(
+          newRequestType === 'correction'
+            ? '✅ تم إرسال طلب تصحيح بيانات الصنف لإدارة المشتريات بنجاح!'
+            : newRequestType === 'new_item'
+            ? '✅ تم إرسال طلب اعتماد الصنف الجديد بالكتالوج المركزي بنجاح!'
+            : '✅ تم إرسال الاستعلام لإدارة المشتريات بنجاح!'
+        );
 
         // 🖨️ طباعة إيصال استلام العربون الحراري المزدوج (نسخة العميل + نسخة الصيدلية)
-        if (parseFloat(depositAmount) > 0 || (printThermalReceipt && customerName.trim())) {
+        if (newRequestType === 'inquiry' && (parseFloat(depositAmount) > 0 || (printThermalReceipt && customerName.trim()))) {
           try {
             printInquiryReceipt({
               inquiryId: res.request?.id || res.id,
               customerName: customerName.trim(),
               customerPhone: customerPhone.trim(),
               customerAddress: customerZone ? `${customerZone} - ${customerAddress.trim()}` : customerAddress.trim(),
-              medicationName: medicationName.trim(),
+              medicationName: finalMedicationName,
               requestedQuantity: parseInt(requestedQuantity, 10) || 1,
               requestedUnit: requestedUnit === 'strip' ? 'شريط' : (requestedUnit === 'pack' ? 'علبة' : requestedUnit),
               itemType,
@@ -334,29 +486,7 @@ export default function ItemInquiryAndCorrectionTab({
 
         setIsNewRequestModalOpen(false);
         setAuthenticatedEmployee(null);
-        setMedicationName('');
-        setSelectedMed(null);
-        setNotes('');
-        setAttachmentImage(null);
-        setAttachmentName('');
-        setCustomerPhone('');
-        setCustomerName('');
-        setCustomerAddress('');
-        setCustomerZone('');
-        setCustomerId(null);
-        setDepositAmount('');
-        setPaymentMethod('cash');
-        setItemType('medication');
-        setRequestedQuantity(1);
-        setRequestedUnit('pack');
-        setProposedData({
-          public_price: '',
-          pack_size: 1,
-          dosage_form: '',
-          manufacturer: '',
-          active_ingredient: '',
-          invoice_display_name: ''
-        });
+        resetNewRequestForm();
         fetchRequests();
       } else {
         showToast(`⚠️ ${res?.error || 'تعذر إرسال الطلب'}`);
@@ -491,9 +621,34 @@ export default function ItemInquiryAndCorrectionTab({
     });
   };
 
-  // فتح نافذة الرد مع تهيئة جدول الأصناف والأسعار وحالة التوفر
+  // فتح نافذة الرد مع تهيئة جدول الأصناف أو كارتة الصنف أو جدول المقارنة
   const handleOpenReplyModal = (reqItem) => {
     setReplyTargetRequest(reqItem);
+    setCorrectionRejectionReason('');
+    setShowRejectBox(false);
+    const prop = reqItem.proposed_data || reqItem.requested_data || {};
+
+    if (reqItem.request_type === 'correction') {
+      const newV = prop.new_values || prop || {};
+      setCorrectionEditableNewVals({ ...defaultCorrectionFields, ...newV });
+    } else if (reqItem.request_type === 'new_item') {
+      setNewItemReplyData({
+        ...defaultNewItemCard,
+        ...prop,
+        tradeName: prop.trade_name_en || prop.tradeName || reqItem.medication_name || '',
+        arabicName: prop.trade_name_ar || prop.arabicName || '',
+        price: prop.public_price || prop.price || '',
+        dosageForm: prop.dosage_form || prop.dosageForm || 'أقراص',
+        packSize: prop.pack_size || prop.packSize || 1,
+        unitName: prop.unit_name || prop.unitName || 'علبة',
+        strength: prop.strength || '',
+        activeIngredients: prop.active_ingredient || prop.activeIngredients || '',
+        company: prop.manufacturer || prop.company || '',
+        barcode: prop.barcode || '',
+        storage_condition: prop.storage_condition || 'room_temp'
+      });
+    }
+
     const replyData = typeof reqItem.procurement_reply === 'object' && reqItem.procurement_reply !== null
       ? reqItem.procurement_reply
       : (typeof reqItem.procurement_reply === 'string'
@@ -522,6 +677,136 @@ export default function ItemInquiryAndCorrectionTab({
           notes: ''
         }];
     setReplyItems(initialItems);
+  };
+
+  // 1. اعتماد وتطبيق تصحيح بيانات الصنف على الكتالوج المركزي
+  const handleApproveCorrection = async () => {
+    if (!replyTargetRequest) return;
+    setIsReplying(true);
+    try {
+      const valsToApply = correctionEditableNewVals || replyTargetRequest.proposed_data?.new_values || replyTargetRequest.proposed_data || {};
+
+      if (replyTargetRequest.medication_id) {
+        const updatePayload = {
+          arabic_name: valsToApply.trade_name_ar || undefined,
+          trade_name: valsToApply.trade_name_en || undefined,
+          invoice_display_name: valsToApply.invoice_display_name || undefined,
+          public_price: valsToApply.public_price ? parseFloat(valsToApply.public_price) : undefined,
+          dosage_form: valsToApply.dosage_form || undefined,
+          pack_size: valsToApply.pack_size ? parseInt(valsToApply.pack_size, 10) : undefined,
+          unit_name: valsToApply.unit_name || undefined,
+          strength: valsToApply.strength || undefined,
+          active_ingredient: valsToApply.active_ingredient || undefined,
+          manufacturer: valsToApply.manufacturer || undefined,
+          barcode: valsToApply.barcode || undefined
+        };
+        await outstockUpdateMedicationDetails(replyTargetRequest.medication_id, updatePayload);
+      }
+
+      const note = replyNotes.trim() || 'تم مراجعة وتعديل بيانات الصنف واعتمادها بالكتالوج المركزي بنجاح.';
+      const res = await outstockReplyMedicationRequest(replyTargetRequest.id, {
+        status: 'approved',
+        notes: note,
+        responseNotes: note,
+        respondedBy: currentUser?.name || currentUser?.full_name || 'إدارة المشتريات'
+      });
+      if (res?.success) {
+        showToast('✅ تم اعتماد تعديل بيانات الصنف وتطبيقها على الكتالوج المركزي وإشعار الفرع!');
+        setReplyTargetRequest(null);
+        fetchRequests();
+      } else {
+        showToast(`⚠️ ${res?.error || 'تعذر اعتماد التعديل'}`);
+      }
+    } catch (err) {
+      showToast(`❌ خطأ: ${err.message}`);
+    } finally {
+      setIsReplying(false);
+    }
+  };
+
+  // 2. رفض التعديل وإرسال سبب الخطأ للفرع
+  const handleRejectCorrection = async () => {
+    if (!replyTargetRequest) return;
+    if (!correctionRejectionReason.trim()) {
+      showToast('⚠️ يرجى كتابة سبب الخطأ في التعديل المرسل لتوضيحه للفرع');
+      return;
+    }
+    setIsReplying(true);
+    try {
+      const errText = `التعديل المرسل خطأ: ${correctionRejectionReason.trim()}`;
+      const res = await outstockReplyMedicationRequest(replyTargetRequest.id, {
+        status: 'rejected',
+        notes: errText,
+        responseNotes: errText,
+        rejectionReason: correctionRejectionReason.trim(),
+        respondedBy: currentUser?.name || currentUser?.full_name || 'إدارة المشتريات'
+      });
+      if (res?.success) {
+        showToast('❌ تم تسجيل أن التعديل المرسل خطأ وإشعار الفرع بالسبب بنجاح');
+        setReplyTargetRequest(null);
+        fetchRequests();
+      } else {
+        showToast(`⚠️ ${res?.error || 'تعذر تسجيل الرفض'}`);
+      }
+    } catch (err) {
+      showToast(`❌ خطأ: ${err.message}`);
+    } finally {
+      setIsReplying(false);
+    }
+  };
+
+  // 3. اعتماد وإضافة الصنف الجديد للكتالوج المركزي
+  const handleApproveNewItemWithData = async () => {
+    if (!replyTargetRequest) return;
+    setIsReplying(true);
+    try {
+      const cardData = newItemReplyData || replyTargetRequest.proposed_data || {};
+      const res = await outstockApproveNewItemRequest(replyTargetRequest.id, {
+        approvedBy: currentUser?.name || currentUser?.full_name || 'إدارة المشتريات',
+        medicationData: cardData
+      });
+      if (res?.success) {
+        showToast(`✅ تم اعتماد وإضافة الصنف "${replyTargetRequest.medication_name}" بالكتالوج المركزي بنجاح!`);
+        setReplyTargetRequest(null);
+        fetchRequests();
+      } else {
+        showToast(`⚠️ ${res?.error || 'تعذر اعتماد الصنف'}`);
+      }
+    } catch (err) {
+      showToast(`❌ خطأ: ${err.message}`);
+    } finally {
+      setIsReplying(false);
+    }
+  };
+
+  // 4. رفض طلب إضافة صنف جديد
+  const handleRejectNewItem = async () => {
+    if (!replyTargetRequest) return;
+    if (!correctionRejectionReason.trim()) {
+      showToast('⚠️ يرجى كتابة سبب رفض إضافة الصنف');
+      return;
+    }
+    setIsReplying(true);
+    try {
+      const errText = `رفض إضافة الصنف: ${correctionRejectionReason.trim()}`;
+      const res = await outstockReplyMedicationRequest(replyTargetRequest.id, {
+        status: 'rejected',
+        notes: errText,
+        responseNotes: errText,
+        respondedBy: currentUser?.name || currentUser?.full_name || 'إدارة المشتريات'
+      });
+      if (res?.success) {
+        showToast('❌ تم رفض طلب إضافة الصنف وإشعار الفرع');
+        setReplyTargetRequest(null);
+        fetchRequests();
+      } else {
+        showToast(`⚠️ ${res?.error || 'تعذر رفض الطلب'}`);
+      }
+    } catch (err) {
+      showToast(`❌ خطأ: ${err.message}`);
+    } finally {
+      setIsReplying(false);
+    }
   };
 
   // إرسال رد المشتريات
@@ -1327,7 +1612,7 @@ export default function ItemInquiryAndCorrectionTab({
       </div>
 
       {/* ─────────────────────────────────────────────────────────────────────── */}
-      {/* ── 1. نافذة تقديم استفسار / طلب تصحيح (للصيدلية) ── */}
+      {/* ── 1. نافذة تقديم استفسار / تصحيح بيانات / صنف جديد (للصيدلية) ── */}
       {/* ─────────────────────────────────────────────────────────────────────── */}
       {isNewRequestModalOpen && (
         <div
@@ -1339,22 +1624,30 @@ export default function ItemInquiryAndCorrectionTab({
             className="outstock-modal-panel"
             onClick={(e) => e.stopPropagation()}
             style={{
-              maxWidth: '820px',
+              maxWidth: '860px',
               width: '100%',
               minHeight: '620px',
               maxHeight: '92vh',
               background: '#ffffff',
-              borderRadius: '18px',
+              borderRadius: '20px',
               display: 'flex',
               flexDirection: 'column',
               boxShadow: '0 25px 50px -12px rgba(15, 23, 42, 0.35)',
               overflow: 'hidden'
             }}
           >
-            <div style={{ padding: '16px 20px', background: 'linear-gradient(135deg, #0284c7 0%, #0369a1 100%)', color: '#ffffff', display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexShrink: 0 }}>
-              <h3 style={{ margin: 0, fontSize: '16px', fontWeight: '800' }}>
-                تقديم طلب / استعلام لإدارة المشتريات
-              </h3>
+            {/* رأس النافذة */}
+            <div style={{ padding: '16px 22px', background: newRequestType === 'correction' ? 'linear-gradient(135deg, #b45309 0%, #d97706 100%)' : newRequestType === 'new_item' ? 'linear-gradient(135deg, #059669 0%, #047857 100%)' : 'linear-gradient(135deg, #0284c7 0%, #0369a1 100%)', color: '#ffffff', display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexShrink: 0 }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                {newRequestType === 'correction' ? <Edit size={20} /> : newRequestType === 'new_item' ? <PlusCircle size={20} /> : <HelpCircle size={20} />}
+                <h3 style={{ margin: 0, fontSize: '16px', fontWeight: '800' }}>
+                  {newRequestType === 'correction'
+                    ? 'طلب تصحيح بيانات صنف مسجل بالكتالوج (مقارنة مباشرة)'
+                    : newRequestType === 'new_item'
+                    ? 'طلب اعتماد وإضافة صنف جديد كلياً بالكتالوج المركزي (Master Card)'
+                    : 'تقديم استعلام سعر وتوفر دواء / مستحضر'}
+                </h3>
+              </div>
               <button
                 type="button"
                 onClick={() => setIsNewRequestModalOpen(false)}
@@ -1375,30 +1668,38 @@ export default function ItemInquiryAndCorrectionTab({
                 </div>
               )}
 
-              {/* اختيار نوع الطلب */}
+              {/* اختيار نوع الطلب الثلاثي */}
               <div>
                 <label style={{ fontSize: '12.5px', fontWeight: '800', color: '#334155', display: 'block', marginBottom: '6px' }}>
-                  نوع الطلب:
+                  حدد نوع الطلب المطلوب:
                 </label>
                 <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '8px' }}>
                   {[
-                    { id: 'inquiry', label: 'استعلام سعر / توفر' },
-                    { id: 'correction', label: 'تصحيح بيانات صنف' },
-                    { id: 'new_item', label: 'طلب صنف جديد كلياً' }
+                    { id: 'inquiry', label: 'استعلام سعر / توفر 🔍', color: '#0284c7', bg: '#e0f2fe' },
+                    { id: 'correction', label: 'تصحيح بيانات صنف 📝', color: '#d97706', bg: '#fef3c7' },
+                    { id: 'new_item', label: 'طلب صنف جديد كلياً 🌟', color: '#059669', bg: '#dcfce7' }
                   ].map((t) => (
                     <button
                       key={t.id}
                       type="button"
-                      onClick={() => setNewRequestType(t.id)}
+                      onClick={() => {
+                        setNewRequestType(t.id);
+                        if (t.id === 'new_item' && selectedMed) {
+                          setSelectedMed(null);
+                          setMedicationName('');
+                        }
+                      }}
                       style={{
-                        padding: '8px',
-                        borderRadius: '8px',
-                        fontSize: '12px',
+                        padding: '10px 8px',
+                        borderRadius: '10px',
+                        fontSize: '12.5px',
                         fontWeight: '800',
                         cursor: 'pointer',
-                        border: newRequestType === t.id ? '2px solid #0284c7' : '1px solid #cbd5e1',
-                        background: newRequestType === t.id ? '#e0f2fe' : '#f8fafc',
-                        color: newRequestType === t.id ? '#0369a1' : '#475569'
+                        border: newRequestType === t.id ? `2px solid ${t.color}` : '1px solid #cbd5e1',
+                        background: newRequestType === t.id ? t.bg : '#f8fafc',
+                        color: newRequestType === t.id ? t.color : '#475569',
+                        boxShadow: newRequestType === t.id ? `0 2px 6px ${t.color}25` : 'none',
+                        transition: 'all 0.15s ease'
                       }}
                     >
                       {t.label}
@@ -1407,337 +1708,866 @@ export default function ItemInquiryAndCorrectionTab({
                 </div>
               </div>
 
-              {/* تصنيف الصنف وتوجيه الطلب */}
-              <div>
-                <label style={{ fontSize: '12.5px', fontWeight: '800', color: '#334155', display: 'block', marginBottom: '6px' }}>
-                  تصنيف الصنف والجهة المختصة بالرد:
-                </label>
-                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px' }}>
-                  <button
-                    type="button"
-                    onClick={() => setItemType('medication')}
-                    style={{
-                      padding: '9px 12px',
-                      borderRadius: '9px',
-                      fontSize: '12.5px',
-                      fontWeight: '800',
-                      cursor: 'pointer',
-                      border: itemType === 'medication' ? '2px solid #0284c7' : '1px solid #cbd5e1',
-                      background: itemType === 'medication' ? '#e0f2fe' : '#f8fafc',
-                      color: itemType === 'medication' ? '#0369a1' : '#475569',
-                      display: 'flex',
-                      alignItems: 'center',
-                      justifyContent: 'center',
-                      gap: '6px'
-                    }}
-                  >
-                    <Pill size={16} color={itemType === 'medication' ? '#0284c7' : '#64748b'} />
-                    <span>صنف دوائي (إدارة المشتريات) 💊</span>
-                  </button>
+              {/* ══════════════════════════════════════════════════════════════ */}
+              {/* ── 1. نموذج استعلام سعر وتوفر دواء / مستحضر ── */}
+              {/* ══════════════════════════════════════════════════════════════ */}
+              {newRequestType === 'inquiry' && (
+                <>
+                  {/* تصنيف الصنف وتوجيه الطلب */}
+                  <div>
+                    <label style={{ fontSize: '12px', fontWeight: '800', color: '#334155', display: 'block', marginBottom: '6px' }}>
+                      تصنيف الصنف والجهة المختصة بالرد:
+                    </label>
+                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px' }}>
+                      <button
+                        type="button"
+                        onClick={() => setItemType('medication')}
+                        style={{
+                          padding: '9px 12px',
+                          borderRadius: '9px',
+                          fontSize: '12px',
+                          fontWeight: '800',
+                          cursor: 'pointer',
+                          border: itemType === 'medication' ? '2px solid #0284c7' : '1px solid #cbd5e1',
+                          background: itemType === 'medication' ? '#e0f2fe' : '#f8fafc',
+                          color: itemType === 'medication' ? '#0369a1' : '#475569',
+                          display: 'flex',
+                          alignItems: 'center',
+                          justifyContent: 'center',
+                          gap: '6px'
+                        }}
+                      >
+                        <Pill size={16} color={itemType === 'medication' ? '#0284c7' : '#64748b'} />
+                        <span>صنف دوائي (إدارة المشتريات) 💊</span>
+                      </button>
 
-                  <button
-                    type="button"
-                    onClick={() => setItemType('cosmetics')}
-                    style={{
-                      padding: '9px 12px',
-                      borderRadius: '9px',
-                      fontSize: '12.5px',
-                      fontWeight: '800',
-                      cursor: 'pointer',
-                      border: itemType === 'cosmetics' ? '2px solid #ec4899' : '1px solid #cbd5e1',
-                      background: itemType === 'cosmetics' ? '#fdf2f8' : '#f8fafc',
-                      color: itemType === 'cosmetics' ? '#be185d' : '#475569',
-                      display: 'flex',
-                      alignItems: 'center',
-                      justifyContent: 'center',
-                      gap: '6px'
-                    }}
-                  >
-                    <Sparkles size={16} color={itemType === 'cosmetics' ? '#ec4899' : '#64748b'} />
-                    <span>مستحضرات تجميل (مسؤول التجميل) 💄</span>
-                  </button>
-                </div>
-                <div style={{ fontSize: '11px', color: '#64748b', marginTop: '4px' }}>
-                  {itemType === 'cosmetics'
-                    ? '💄 سيتم توجيه الاستعلام والطلب مباشرة إلى مسؤول مستحضرات التجميل والعناية'
-                    : '💊 سيتم توجيه الاستعلام والطلب مباشرة إلى مدير المشتريات والأدوية'}
-                </div>
-              </div>
+                      <button
+                        type="button"
+                        onClick={() => setItemType('cosmetics')}
+                        style={{
+                          padding: '9px 12px',
+                          borderRadius: '9px',
+                          fontSize: '12px',
+                          fontWeight: '800',
+                          cursor: 'pointer',
+                          border: itemType === 'cosmetics' ? '2px solid #ec4899' : '1px solid #cbd5e1',
+                          background: itemType === 'cosmetics' ? '#fdf2f8' : '#f8fafc',
+                          color: itemType === 'cosmetics' ? '#be185d' : '#475569',
+                          display: 'flex',
+                          alignItems: 'center',
+                          justifyContent: 'center',
+                          gap: '6px'
+                        }}
+                      >
+                        <Sparkles size={16} color={itemType === 'cosmetics' ? '#ec4899' : '#64748b'} />
+                        <span>مستحضرات تجميل (مسؤول التجميل) 💄</span>
+                      </button>
+                    </div>
+                  </div>
 
-              {/* اختيار أو كتابة اسم الصنف */}
-              <div style={{ position: 'relative', zIndex: 100 }}>
-                <label style={{ fontSize: '12.5px', fontWeight: '800', color: '#334155', display: 'block', marginBottom: '6px' }}>
-                  اسم الصنف الدوائي * :
-                </label>
-                {newRequestType !== 'new_item' ? (
-                  <MedicationAutocompleteInput
-                    value={medicationName}
-                    selectedMed={selectedMed}
-                    onMedicationSelect={(name, med) => {
-                      setMedicationName(name);
-                      setSelectedMed(med);
-                      if (med) {
-                        setProposedData({
-                          public_price: med.public_price || '',
-                          pack_size: med.pack_size || 1,
-                          dosage_form: med.dosage_form || '',
-                          manufacturer: med.manufacturer || '',
-                          active_ingredient: med.active_ingredient || '',
-                          invoice_display_name: med.invoice_display_name || ''
-                        });
-                        if (med.item_type) {
-                          setItemType(med.item_type);
-                        } else if (med.category?.includes('تجميل')) {
-                          setItemType('cosmetics');
+                  {/* اسم الصنف مع إكمال تلقائي */}
+                  <div style={{ position: 'relative', zIndex: 100 }}>
+                    <label style={{ fontSize: '12px', fontWeight: '800', color: '#334155', display: 'block', marginBottom: '6px' }}>
+                      اسم الصنف المستعلم عنه * :
+                    </label>
+                    <MedicationAutocompleteInput
+                      value={medicationName}
+                      selectedMed={selectedMed}
+                      onMedicationSelect={(name, med) => {
+                        setMedicationName(name);
+                        setSelectedMed(med);
+                        if (med) {
+                          if (med.item_type) setItemType(med.item_type);
+                          else if (med.category?.includes('تجميل')) setItemType('cosmetics');
                         }
-                      }
-                    }}
-                    onTextChange={(val) => setMedicationName(val)}
-                    placeholder="ابحث بالاسم التجاري أو الباركود..."
-                    required
-                  />
-                ) : (
-                  <input
-                    type="text"
-                    required
-                    placeholder="اكتب الاسم التجاري للصنف الجديد بدقة..."
-                    value={medicationName}
-                    onChange={(e) => setMedicationName(e.target.value)}
-                    className="outstock-form-input"
-                  />
-                )}
-              </div>
-
-              {/* الكمية والوحدة المطلوبة */}
-              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px' }}>
-                <div>
-                  <label style={{ fontSize: '12px', fontWeight: '700', color: '#475569', display: 'block', marginBottom: '4px' }}>
-                    الكمية المطلوبة:
-                  </label>
-                  <input
-                    type="number"
-                    min="1"
-                    value={requestedQuantity}
-                    onChange={(e) => setRequestedQuantity(Math.max(1, parseInt(e.target.value, 10) || 1))}
-                    className="outstock-form-input"
-                    style={{ minHeight: '38px', fontWeight: 'bold' }}
-                  />
-                </div>
-                <div>
-                  <label style={{ fontSize: '12px', fontWeight: '700', color: '#475569', display: 'block', marginBottom: '4px' }}>
-                    الوحدة:
-                  </label>
-                  <select
-                    value={requestedUnit}
-                    onChange={(e) => setRequestedUnit(e.target.value)}
-                    className="outstock-form-select"
-                    style={{ minHeight: '38px', fontWeight: 'bold' }}
-                  >
-                    <option value="pack">علبة كاملة 📦</option>
-                    <option value="strip">شريط 💊</option>
-                    <option value="ampoule">أمبول / فيال 💉</option>
-                    <option value="unit">وحدة / قطعة 🧴</option>
-                  </select>
-                </div>
-              </div>
-
-              {/* ── بيانات العميل وحجز الصنف ── */}
-              <div style={{ background: '#f8fafc', padding: '14px', borderRadius: '12px', border: '1px solid #e2e8f0', display: 'flex', flexDirection: 'column', gap: '10px' }}>
-                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-                  <div style={{ fontSize: '12.5px', fontWeight: '800', color: '#0f172a', display: 'flex', alignItems: 'center', gap: '6px' }}>
-                    <User size={15} color="#0284c7" />
-                    <span>بيانات العميل (اختياري / لحجز الصنف وإشعار العميل):</span>
-                  </div>
-                  {isSearchingCustomer && (
-                    <span style={{ fontSize: '11px', color: '#0284c7', fontWeight: 'bold' }}>جاري البحث عن بيانات العميل...</span>
-                  )}
-                </div>
-
-                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px' }}>
-                  <div>
-                    <label style={{ fontSize: '11.5px', color: '#475569', fontWeight: '700', display: 'block', marginBottom: '3px' }}>
-                      رقم هاتف العميل (11 رقم):
-                    </label>
-                    <input
-                      type="tel"
-                      maxLength={11}
-                      placeholder="01xxxxxxxxx"
-                      value={customerPhone}
-                      onChange={(e) => handleCustomerPhoneChange(e.target.value)}
-                      className="outstock-form-input"
-                      style={{ minHeight: '36px', direction: 'ltr', textAlign: 'right' }}
+                      }}
+                      onTextChange={(val) => setMedicationName(val)}
+                      placeholder="ابحث بالاسم التجاري أو الباركود..."
+                      required
                     />
                   </div>
 
-                  <div>
-                    <label style={{ fontSize: '11.5px', color: '#475569', fontWeight: '700', display: 'block', marginBottom: '3px' }}>
-                      اسم العميل:
-                    </label>
-                    <input
-                      type="text"
-                      placeholder="اكتب اسم العميل..."
-                      value={customerName}
-                      onChange={(e) => setCustomerName(e.target.value)}
-                      className="outstock-form-input"
-                      style={{ minHeight: '36px' }}
-                    />
-                  </div>
-                </div>
-
-                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px' }}>
-                  <div>
-                    <label style={{ fontSize: '11.5px', color: '#475569', fontWeight: '700', display: 'block', marginBottom: '3px' }}>
-                      المنطقة / الحي المعتمد (من إعدادات المالك):
-                    </label>
-                    <select
-                      value={customerZone}
-                      onChange={(e) => setCustomerZone(e.target.value)}
-                      className="outstock-form-select"
-                      style={{ minHeight: '36px' }}
-                    >
-                      <option value="">-- اختر المنطقة / الحي --</option>
-                      {deliveryZones.map((z) => (
-                        <option key={z} value={z}>{z}</option>
-                      ))}
-                    </select>
-                  </div>
-
-                  <div>
-                    <label style={{ fontSize: '11.5px', color: '#475569', fontWeight: '700', display: 'block', marginBottom: '3px' }}>
-                      تفاصيل الشارع / العنوان:
-                    </label>
-                    <input
-                      type="text"
-                      placeholder="الشارع، رقم العمارة، الشقة..."
-                      value={customerAddress}
-                      onChange={(e) => setCustomerAddress(e.target.value)}
-                      className="outstock-form-input"
-                      style={{ minHeight: '36px' }}
-                    />
-                  </div>
-                </div>
-              </div>
-
-              {/* ── العربون وطريقة الدفع وإيصال الكاشير ── */}
-              <div style={{ background: '#f0fdf4', padding: '14px', borderRadius: '12px', border: '1px solid #bbf7d0', display: 'flex', flexDirection: 'column', gap: '10px' }}>
-                <div style={{ fontSize: '12.5px', fontWeight: '800', color: '#166534', display: 'flex', alignItems: 'center', gap: '6px' }}>
-                  <Coins size={15} color="#15803d" />
-                  <span>مبلغ العربون المستلم وطريقة الدفع:</span>
-                </div>
-
-                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px' }}>
-                  <div>
-                    <label style={{ fontSize: '11.5px', color: '#166534', fontWeight: '700', display: 'block', marginBottom: '3px' }}>
-                      مبلغ العربون المسلم بالصيدلية (ج.م):
-                    </label>
-                    <input
-                      type="number"
-                      step="1"
-                      min="0"
-                      placeholder="0.00"
-                      value={depositAmount}
-                      onChange={(e) => setDepositAmount(e.target.value)}
-                      className="outstock-form-input"
-                      style={{ minHeight: '36px', fontWeight: 'bold', color: '#15803d' }}
-                    />
-                  </div>
-
-                  <div>
-                    <label style={{ fontSize: '11.5px', color: '#166534', fontWeight: '700', display: 'block', marginBottom: '3px' }}>
-                      طريقة دفع العربون:
-                    </label>
-                    <select
-                      value={paymentMethod}
-                      onChange={(e) => setPaymentMethod(e.target.value)}
-                      className="outstock-form-select"
-                      style={{ minHeight: '36px', fontWeight: 'bold' }}
-                    >
-                      <option value="cash">نقدي (كاش) 💵</option>
-                      <option value="card">بطاقة بنكية / فيزا 💳</option>
-                      <option value="wallet">محفظة إلكترونية / إنستاباي 📱</option>
-                      <option value="vodafone_cash">فودافون كاش 📱</option>
-                      <option value="delayed">آجل ⏳</option>
-                    </select>
-                  </div>
-                </div>
-
-                <label style={{ display: 'flex', alignItems: 'center', gap: '8px', cursor: 'pointer', fontSize: '12px', color: '#166534', fontWeight: 'bold' }}>
-                  <input
-                    type="checkbox"
-                    checked={printThermalReceipt}
-                    onChange={(e) => setPrintThermalReceipt(e.target.checked)}
-                    style={{ width: '16px', height: '16px', accentColor: '#16a34a' }}
-                  />
-                  <span>طباعة نسختين من الإيصال الحراري فور الإرسال (نسخة للعميل + نسخة للصيدلية) 🖨️</span>
-                </label>
-              </div>
-
-              {/* تفاصيل إضافية للصنف الجديد أو تصحيح البيانات */}
-              {newRequestType !== 'inquiry' && (
-                <div style={{ background: '#f8fafc', padding: '12px', borderRadius: '10px', border: '1px solid #e2e8f0', display: 'flex', flexDirection: 'column', gap: '10px' }}>
-                  <div style={{ fontSize: '12px', fontWeight: '800', color: '#0369a1' }}>
-                    بيانات الصنف المقترحة / الصحيحة:
-                  </div>
-
+                  {/* الكمية والوحدة المطلوبة */}
                   <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px' }}>
                     <div>
-                      <label style={{ fontSize: '11px', color: '#475569', fontWeight: '700', display: 'block', marginBottom: '3px' }}>
-                        السعر الرسمي الصحيح للعلبة (ج.م):
-                      </label>
-                      <input
-                        type="number"
-                        step="0.25"
-                        placeholder="0.00"
-                        value={proposedData.public_price}
-                        onChange={(e) => setProposedData({ ...proposedData, public_price: e.target.value })}
-                        className="outstock-form-input"
-                        style={{ minHeight: '36px' }}
-                      />
-                    </div>
-
-                    <div>
-                      <label style={{ fontSize: '11px', color: '#475569', fontWeight: '700', display: 'block', marginBottom: '3px' }}>
-                        حجم العبوة (عدد الوحدات):
+                      <label style={{ fontSize: '12px', fontWeight: '700', color: '#475569', display: 'block', marginBottom: '4px' }}>
+                        الكمية المطلوبة:
                       </label>
                       <input
                         type="number"
                         min="1"
-                        value={proposedData.pack_size}
-                        onChange={(e) => setProposedData({ ...proposedData, pack_size: e.target.value })}
+                        value={requestedQuantity}
+                        onChange={(e) => setRequestedQuantity(Math.max(1, parseInt(e.target.value, 10) || 1))}
                         className="outstock-form-input"
-                        style={{ minHeight: '36px' }}
+                        style={{ minHeight: '38px', fontWeight: 'bold' }}
                       />
+                    </div>
+                    <div>
+                      <label style={{ fontSize: '12px', fontWeight: '700', color: '#475569', display: 'block', marginBottom: '4px' }}>
+                        الوحدة:
+                      </label>
+                      <select
+                        value={requestedUnit}
+                        onChange={(e) => setRequestedUnit(e.target.value)}
+                        className="outstock-form-select"
+                        style={{ minHeight: '38px', fontWeight: 'bold' }}
+                      >
+                        <option value="pack">علبة كاملة 📦</option>
+                        <option value="strip">شريط 💊</option>
+                        <option value="ampoule">أمبول / فيال 💉</option>
+                        <option value="unit">وحدة / قطعة 🧴</option>
+                      </select>
                     </div>
                   </div>
 
-                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px' }}>
-                    <div>
-                      <label style={{ fontSize: '11px', color: '#475569', fontWeight: '700', display: 'block', marginBottom: '3px' }}>
-                        المادة الفعالة:
-                      </label>
-                      <input
-                        type="text"
-                        placeholder="مثال: Paracetamol"
-                        value={proposedData.active_ingredient}
-                        onChange={(e) => setProposedData({ ...proposedData, active_ingredient: e.target.value })}
-                        className="outstock-form-input"
-                        style={{ minHeight: '36px' }}
-                      />
+                  {/* بيانات العميل */}
+                  <div style={{ background: '#f8fafc', padding: '14px', borderRadius: '12px', border: '1px solid #e2e8f0', display: 'flex', flexDirection: 'column', gap: '10px' }}>
+                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                      <div style={{ fontSize: '12.5px', fontWeight: '800', color: '#0f172a', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                        <User size={15} color="#0284c7" />
+                        <span>بيانات العميل (لحجز الصنف وإشعاره بالواتساب):</span>
+                      </div>
+                      {isSearchingCustomer && (
+                        <span style={{ fontSize: '11px', color: '#0284c7', fontWeight: 'bold' }}>جاري البحث عن بيانات العميل...</span>
+                      )}
                     </div>
 
-                    <div>
-                      <label style={{ fontSize: '11px', color: '#475569', fontWeight: '700', display: 'block', marginBottom: '3px' }}>
-                        الشركة المصنعة:
-                      </label>
-                      <input
-                        type="text"
-                        placeholder="مثال: Novartis"
-                        value={proposedData.manufacturer}
-                        onChange={(e) => setProposedData({ ...proposedData, manufacturer: e.target.value })}
-                        className="outstock-form-input"
-                        style={{ minHeight: '36px' }}
-                      />
+                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px' }}>
+                      <div>
+                        <label style={{ fontSize: '11.5px', color: '#475569', fontWeight: '700', display: 'block', marginBottom: '3px' }}>
+                          رقم هاتف العميل (11 رقم):
+                        </label>
+                        <input
+                          type="tel"
+                          maxLength={11}
+                          placeholder="01xxxxxxxxx"
+                          value={customerPhone}
+                          onChange={(e) => handleCustomerPhoneChange(e.target.value)}
+                          className="outstock-form-input"
+                          style={{ minHeight: '36px', direction: 'ltr', textAlign: 'right' }}
+                        />
+                      </div>
+                      <div>
+                        <label style={{ fontSize: '11.5px', color: '#475569', fontWeight: '700', display: 'block', marginBottom: '3px' }}>
+                          اسم العميل:
+                        </label>
+                        <input
+                          type="text"
+                          placeholder="اكتب اسم العميل..."
+                          value={customerName}
+                          onChange={(e) => setCustomerName(e.target.value)}
+                          className="outstock-form-input"
+                          style={{ minHeight: '36px' }}
+                        />
+                      </div>
                     </div>
+
+                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px' }}>
+                      <div>
+                        <label style={{ fontSize: '11.5px', color: '#475569', fontWeight: '700', display: 'block', marginBottom: '3px' }}>
+                          المنطقة / الحي المعتمد (من إعدادات المالك):
+                        </label>
+                        <select
+                          value={customerZone}
+                          onChange={(e) => setCustomerZone(e.target.value)}
+                          className="outstock-form-select"
+                          style={{ minHeight: '36px' }}
+                        >
+                          <option value="">-- اختر المنطقة / الحي --</option>
+                          {deliveryZones.map((z) => (
+                            <option key={z} value={z}>{z}</option>
+                          ))}
+                        </select>
+                      </div>
+                      <div>
+                        <label style={{ fontSize: '11.5px', color: '#475569', fontWeight: '700', display: 'block', marginBottom: '3px' }}>
+                          تفاصيل الشارع / العنوان:
+                        </label>
+                        <input
+                          type="text"
+                          placeholder="الشارع، رقم العمارة، الشقة..."
+                          value={customerAddress}
+                          onChange={(e) => setCustomerAddress(e.target.value)}
+                          className="outstock-form-input"
+                          style={{ minHeight: '36px' }}
+                        />
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* العربون والدفع */}
+                  <div style={{ background: '#f0fdf4', padding: '14px', borderRadius: '12px', border: '1px solid #bbf7d0', display: 'flex', flexDirection: 'column', gap: '10px' }}>
+                    <div style={{ fontSize: '12.5px', fontWeight: '800', color: '#166534', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                      <Coins size={15} color="#15803d" />
+                      <span>مبلغ العربون المستلم وطريقة الدفع:</span>
+                    </div>
+
+                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px' }}>
+                      <div>
+                        <label style={{ fontSize: '11.5px', color: '#166534', fontWeight: '700', display: 'block', marginBottom: '3px' }}>
+                          مبلغ العربون المسلم بالصيدلية (ج.م):
+                        </label>
+                        <input
+                          type="number"
+                          step="1"
+                          min="0"
+                          placeholder="0.00"
+                          value={depositAmount}
+                          onChange={(e) => setDepositAmount(e.target.value)}
+                          className="outstock-form-input"
+                          style={{ minHeight: '36px', fontWeight: 'bold', color: '#15803d' }}
+                        />
+                      </div>
+                      <div>
+                        <label style={{ fontSize: '11.5px', color: '#166534', fontWeight: '700', display: 'block', marginBottom: '3px' }}>
+                          طريقة دفع العربون:
+                        </label>
+                        <select
+                          value={paymentMethod}
+                          onChange={(e) => setPaymentMethod(e.target.value)}
+                          className="outstock-form-select"
+                          style={{ minHeight: '36px', fontWeight: 'bold' }}
+                        >
+                          <option value="cash">نقدي (كاش) 💵</option>
+                          <option value="card">بطاقة بنكية / فيزا 💳</option>
+                          <option value="wallet">محفظة إلكترونية / إنستاباي 📱</option>
+                          <option value="vodafone_cash">فودافون كاش 📱</option>
+                          <option value="delayed">آجل ⏳</option>
+                        </select>
+                      </div>
+                    </div>
+
+                    <label style={{ display: 'flex', alignItems: 'center', gap: '8px', cursor: 'pointer', fontSize: '12px', color: '#166534', fontWeight: 'bold' }}>
+                      <input
+                        type="checkbox"
+                        checked={printThermalReceipt}
+                        onChange={(e) => setPrintThermalReceipt(e.target.checked)}
+                        style={{ width: '16px', height: '16px', accentColor: '#16a34a' }}
+                      />
+                      <span>طباعة نسختين من الإيصال الحراري فور الإرسال (نسخة للعميل + نسخة للصيدلية) 🖨️</span>
+                    </label>
+                  </div>
+                </>
+              )}
+
+              {/* ══════════════════════════════════════════════════════════════ */}
+              {/* ── 2. نموذج طلب تصحيح بيانات صنف مسجل (مقارنة القديم بالجديد) ── */}
+              {/* ══════════════════════════════════════════════════════════════ */}
+              {newRequestType === 'correction' && (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '14px' }}>
+                  {/* تحديد التصنيف */}
+                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px' }}>
+                    <button
+                      type="button"
+                      onClick={() => setItemType('medication')}
+                      style={{
+                        padding: '9px 12px',
+                        borderRadius: '9px',
+                        fontSize: '12px',
+                        fontWeight: '800',
+                        cursor: 'pointer',
+                        border: itemType === 'medication' ? '2px solid #b45309' : '1px solid #cbd5e1',
+                        background: itemType === 'medication' ? '#fef3c7' : '#f8fafc',
+                        color: itemType === 'medication' ? '#92400e' : '#475569',
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        gap: '6px'
+                      }}
+                    >
+                      <Pill size={16} color={itemType === 'medication' ? '#b45309' : '#64748b'} />
+                      <span>صنف دوائي (كارتة أدوية) 💊</span>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setItemType('cosmetics')}
+                      style={{
+                        padding: '9px 12px',
+                        borderRadius: '9px',
+                        fontSize: '12px',
+                        fontWeight: '800',
+                        cursor: 'pointer',
+                        border: itemType === 'cosmetics' ? '2px solid #ec4899' : '1px solid #cbd5e1',
+                        background: itemType === 'cosmetics' ? '#fdf2f8' : '#f8fafc',
+                        color: itemType === 'cosmetics' ? '#be185d' : '#475569',
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        gap: '6px'
+                      }}
+                    >
+                      <Sparkles size={16} color={itemType === 'cosmetics' ? '#ec4899' : '#64748b'} />
+                      <span>مستحضرات تجميل (كارتة عناية وتجميل) 💄</span>
+                    </button>
+                  </div>
+
+                  {/* البحث عن الصنف المسجل */}
+                  <div style={{ position: 'relative', zIndex: 100 }}>
+                    <label style={{ fontSize: '12px', fontWeight: '800', color: '#334155', display: 'block', marginBottom: '6px' }}>
+                      اختر الصنف المراد تصحيح بياناته من الكتالوج * :
+                    </label>
+                    <MedicationAutocompleteInput
+                      value={medicationName}
+                      selectedMed={selectedMed}
+                      onMedicationSelect={(name, med) => {
+                        setMedicationName(name);
+                        setSelectedMed(med);
+                        if (med) {
+                          const oldVals = {
+                            trade_name_en: med.trade_name || med.tradeName || med.name || name || '',
+                            trade_name_ar: med.arabic_name || med.arabicName || '',
+                            invoice_display_name: med.invoice_display_name || med.invoiceDisplayName || '',
+                            public_price: med.public_price || med.price || '',
+                            dosage_form: med.dosage_form || med.dosageForm || '',
+                            pack_size: med.pack_size || med.packSize || 1,
+                            unit_name: med.unit_name || med.unitName || 'علبة',
+                            strength: med.strength || '',
+                            active_ingredient: med.active_ingredient || med.activeIngredients || '',
+                            manufacturer: med.manufacturer || med.company || '',
+                            barcode: med.barcode || '',
+                            brand: med.brand || '',
+                            category: med.category || '',
+                            skin_type: med.skin_type || '',
+                            size_volume: med.size_volume || ''
+                          };
+                          setCorrectionOldValues(oldVals);
+                          setCorrectionNewValues({ ...oldVals });
+                          if (med.item_type) setItemType(med.item_type);
+                          else if (med.category?.includes('تجميل')) setItemType('cosmetics');
+                        }
+                      }}
+                      onTextChange={(val) => setMedicationName(val)}
+                      placeholder="ابحث بالاسم التجاري أو الباركود لتحميل البيانات الحالية..."
+                      required
+                    />
+                  </div>
+
+                  {/* جدول المقارنة جنباً إلى جنب بين البند القديم والجديد */}
+                  {selectedMed ? (
+                    <div style={{ background: '#ffffff', border: '1px solid #cbd5e1', borderRadius: '12px', overflow: 'hidden' }}>
+                      <div style={{ background: '#f8fafc', padding: '10px 14px', borderBottom: '1px solid #e2e8f0', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '6px', fontWeight: 800, fontSize: '13px', color: '#0f172a' }}>
+                          <Tag size={15} color="#b45309" />
+                          <span>كارتة المقارنة المباشرة: (البند القديم المخزن ↔ البند الجديد المراد تعديله)</span>
+                        </div>
+                        <span style={{ fontSize: '11px', color: '#64748b' }}>
+                          عدّل فقط البنود المراد تصحيحها وسيتم إبرازها تلقائياً
+                        </span>
+                      </div>
+
+                      {(() => {
+                        const isCosm = itemType === 'cosmetics';
+                        const fields = isCosm ? [
+                          { id: 'trade_name_ar', label: 'الاسم التجاري (عربي)', type: 'text' },
+                          { id: 'trade_name_en', label: 'الاسم التجاري (إنجليزي)', type: 'text' },
+                          { id: 'brand', label: 'الماركة / البراند', type: 'text' },
+                          { id: 'category', label: 'التصنيف', type: 'text' },
+                          { id: 'skin_type', label: 'نوع البشرة / الاستخدام', type: 'text' },
+                          { id: 'public_price', label: 'سعر الجمهور الرسمي (ج.م)', type: 'number', step: '0.25' },
+                          { id: 'size_volume', label: 'الحجم / السعة', type: 'text' },
+                          { id: 'manufacturer', label: 'الشركة / بلد المنشأ', type: 'text' },
+                          { id: 'barcode', label: 'الباركود الدولي', type: 'text' }
+                        ] : [
+                          { id: 'trade_name_ar', label: 'الاسم التجاري (عربي)', type: 'text' },
+                          { id: 'trade_name_en', label: 'الاسم التجاري (إنجليزي)', type: 'text' },
+                          { id: 'invoice_display_name', label: 'الاسم المختصر بالفاتورة', type: 'text' },
+                          { id: 'public_price', label: 'سعر الجمهور الرسمي (ج.م)', type: 'number', step: '0.25' },
+                          { id: 'dosage_form', label: 'الشكل الدوائي', type: 'select', options: ['أقراص', 'كبسولات', 'شراب', 'معلق', 'أمبولات', 'فيال', 'مرهم', 'كريم', 'جل', 'نقط عين', 'نقط أذن', 'نقط أنف', 'بخاخ', 'فوار / أكياس', 'لبوس', 'محلول'] },
+                          { id: 'pack_size', label: 'حجم العبوة (عدد الوحدات)', type: 'number', step: '1' },
+                          { id: 'unit_name', label: 'وحدة البيع', type: 'select', options: ['علبة', 'شريط', 'أمبول', 'زجاجة', 'قطعة', 'كيس'] },
+                          { id: 'strength', label: 'التركيز', type: 'text' },
+                          { id: 'active_ingredient', label: 'المادة الفعالة', type: 'text' },
+                          { id: 'manufacturer', label: 'الشركة المصنعة', type: 'text' },
+                          { id: 'barcode', label: 'الباركود الدولي', type: 'text' }
+                        ];
+
+                        return (
+                          <div style={{ overflowX: 'auto' }}>
+                            <table className="outstock-diff-table" style={{ width: '100%', borderCollapse: 'collapse', fontSize: '12px', textAlign: 'right' }}>
+                              <thead>
+                                <tr style={{ background: '#f1f5f9', color: '#475569', borderBottom: '1px solid #cbd5e1' }}>
+                                  <th style={{ padding: '8px 12px', fontWeight: 800 }}>البند والمواصفة</th>
+                                  <th style={{ padding: '8px 12px', fontWeight: 800, color: '#64748b' }}>البند القديم المخزن بالنظام</th>
+                                  <th style={{ padding: '8px 12px', fontWeight: 800, color: '#0369a1' }}>البند الجديد المراد تعديله</th>
+                                  <th style={{ padding: '8px 8px', fontWeight: 800, textAlign: 'center', width: '70px' }}>الحالة</th>
+                                </tr>
+                              </thead>
+                              <tbody>
+                                {fields.map((f) => {
+                                  const oldVal = correctionOldValues[f.id] !== undefined && correctionOldValues[f.id] !== null && correctionOldValues[f.id] !== '' ? String(correctionOldValues[f.id]) : '—';
+                                  const newVal = correctionNewValues[f.id] !== undefined && correctionNewValues[f.id] !== null ? String(correctionNewValues[f.id]) : '';
+                                  const isChanged = newVal && newVal !== oldVal && oldVal !== '—';
+
+                                  return (
+                                    <tr key={f.id} style={{ borderBottom: '1px solid #f1f5f9', background: isChanged ? '#f0fdf4' : 'transparent' }}>
+                                      <td style={{ padding: '8px 12px', fontWeight: 700, color: '#1e293b' }}>
+                                        {f.label}
+                                      </td>
+                                      <td style={{ padding: '8px 12px', color: '#64748b' }}>
+                                        <span className="outstock-diff-old-val">
+                                          {f.id === 'public_price' && oldVal !== '—' ? `${parseFloat(oldVal).toFixed(2)} ج.م` : oldVal}
+                                        </span>
+                                      </td>
+                                      <td style={{ padding: '8px 12px' }}>
+                                        {f.type === 'select' ? (
+                                          <select
+                                            value={newVal}
+                                            onChange={(e) => setCorrectionNewValues({ ...correctionNewValues, [f.id]: e.target.value })}
+                                            className="outstock-form-select"
+                                            style={{
+                                              minHeight: '32px',
+                                              fontSize: '12px',
+                                              fontWeight: isChanged ? '800' : '600',
+                                              borderColor: isChanged ? '#10b981' : '#cbd5e1',
+                                              background: isChanged ? '#ecfdf5' : '#ffffff'
+                                            }}
+                                          >
+                                            <option value="">-- اختر --</option>
+                                            {f.options.map((opt) => (
+                                              <option key={opt} value={opt}>{opt}</option>
+                                            ))}
+                                          </select>
+                                        ) : (
+                                          <input
+                                            type={f.type}
+                                            step={f.step}
+                                            value={newVal}
+                                            onChange={(e) => setCorrectionNewValues({ ...correctionNewValues, [f.id]: e.target.value })}
+                                            placeholder={`أدخل ${f.label}...`}
+                                            className="outstock-form-input"
+                                            style={{
+                                              minHeight: '32px',
+                                              fontSize: '12px',
+                                              fontWeight: isChanged ? '800' : '600',
+                                              borderColor: isChanged ? '#10b981' : '#cbd5e1',
+                                              background: isChanged ? '#ecfdf5' : '#ffffff',
+                                              color: isChanged ? '#047857' : '#0f172a'
+                                            }}
+                                          />
+                                        )}
+                                      </td>
+                                      <td style={{ padding: '8px 8px', textAlign: 'center' }}>
+                                        {isChanged ? (
+                                          <span style={{ fontSize: '10.5px', background: '#dcfce7', color: '#15803d', padding: '2px 6px', borderRadius: '4px', fontWeight: 800 }}>
+                                            معدل ✨
+                                          </span>
+                                        ) : (
+                                          <span style={{ fontSize: '10.5px', color: '#94a3b8' }}>مطابق</span>
+                                        )}
+                                      </td>
+                                    </tr>
+                                  );
+                                })}
+                              </tbody>
+                            </table>
+                          </div>
+                        );
+                      })()}
+                    </div>
+                  ) : (
+                    <div style={{ background: '#fffbeb', border: '1px dashed #fde68a', borderRadius: '10px', padding: '16px', textAlign: 'center', color: '#92400e', fontSize: '12.5px' }}>
+                      👆 يرجى البحث واختيار الصنف المراد تصحيح بياناته من الكتالوج أعلاه لعرض كارتة المقارنة جنباً إلى جنب
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {/* ══════════════════════════════════════════════════════════════ */}
+              {/* ── 3. نموذج طلب اعتماد صنف جديد كلياً (Master Card كاملة) ── */}
+              {/* ══════════════════════════════════════════════════════════════ */}
+              {newRequestType === 'new_item' && (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '14px' }}>
+                  {/* تبويب التصنيف: دواء أو تجميل */}
+                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px' }}>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setItemType('medication');
+                        setNewItemCard({ ...newItemCard, item_type: 'medication' });
+                      }}
+                      style={{
+                        padding: '10px 14px',
+                        borderRadius: '10px',
+                        fontSize: '12.5px',
+                        fontWeight: '800',
+                        cursor: 'pointer',
+                        border: itemType === 'medication' ? '2px solid #059669' : '1px solid #cbd5e1',
+                        background: itemType === 'medication' ? '#dcfce7' : '#f8fafc',
+                        color: itemType === 'medication' ? '#065f46' : '#475569',
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        gap: '6px'
+                      }}
+                    >
+                      <Pill size={16} color={itemType === 'medication' ? '#059669' : '#64748b'} />
+                      <span>صنف دوائي (كارتة أدوية) 💊</span>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setItemType('cosmetics');
+                        setNewItemCard({ ...newItemCard, item_type: 'cosmetics' });
+                      }}
+                      style={{
+                        padding: '10px 14px',
+                        borderRadius: '10px',
+                        fontSize: '12.5px',
+                        fontWeight: '800',
+                        cursor: 'pointer',
+                        border: itemType === 'cosmetics' ? '2px solid #ec4899' : '1px solid #cbd5e1',
+                        background: itemType === 'cosmetics' ? '#fdf2f8' : '#f8fafc',
+                        color: itemType === 'cosmetics' ? '#be185d' : '#475569',
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        gap: '6px'
+                      }}
+                    >
+                      <Sparkles size={16} color={itemType === 'cosmetics' ? '#ec4899' : '#64748b'} />
+                      <span>مستحضرات تجميل (كارتة عناية) 💄</span>
+                    </button>
+                  </div>
+
+                  {/* حقول كارتة الصنف الكاملة (Master Card) */}
+                  <div style={{ background: '#f8fafc', border: '1px solid #e2e8f0', borderRadius: '14px', padding: '16px', display: 'flex', flexDirection: 'column', gap: '12px' }}>
+                    <div style={{ fontSize: '13px', fontWeight: 800, color: '#0f172a', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                      <Pill size={16} color="#059669" />
+                      <span>بيانات كارتة الصنف الكاملة (Master Card):</span>
+                    </div>
+
+                    {itemType === 'medication' ? (
+                      /* حقول الدواء الكاملة */
+                      <>
+                        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px' }}>
+                          <div>
+                            <label style={{ fontSize: '11.5px', fontWeight: '700', color: '#475569', display: 'block', marginBottom: '3px' }}>
+                              الاسم التجاري (إنجليزي) * :
+                            </label>
+                            <input
+                              type="text"
+                              required
+                              placeholder="مثال: Panadol Extra 500mg"
+                              value={newItemCard.trade_name_en}
+                              onChange={(e) => {
+                                setNewItemCard({ ...newItemCard, trade_name_en: e.target.value });
+                                setMedicationName(e.target.value);
+                              }}
+                              className="outstock-form-input"
+                              style={{ minHeight: '36px' }}
+                            />
+                          </div>
+                          <div>
+                            <label style={{ fontSize: '11.5px', fontWeight: '700', color: '#475569', display: 'block', marginBottom: '3px' }}>
+                              الاسم التجاري (عربي):
+                            </label>
+                            <input
+                              type="text"
+                              placeholder="مثال: بنادول إكسترا أقراص"
+                              value={newItemCard.trade_name_ar}
+                              onChange={(e) => setNewItemCard({ ...newItemCard, trade_name_ar: e.target.value })}
+                              className="outstock-form-input"
+                              style={{ minHeight: '36px' }}
+                            />
+                          </div>
+                        </div>
+
+                        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px' }}>
+                          <div>
+                            <label style={{ fontSize: '11.5px', fontWeight: '700', color: '#475569', display: 'block', marginBottom: '3px' }}>
+                              الاسم المختصر بالفاتورة:
+                            </label>
+                            <input
+                              type="text"
+                              placeholder="مثال: Panadol Extra"
+                              value={newItemCard.invoice_display_name}
+                              onChange={(e) => setNewItemCard({ ...newItemCard, invoice_display_name: e.target.value })}
+                              className="outstock-form-input"
+                              style={{ minHeight: '36px' }}
+                            />
+                          </div>
+                          <div>
+                            <label style={{ fontSize: '11.5px', fontWeight: '700', color: '#475569', display: 'block', marginBottom: '3px' }}>
+                              الشكل الدوائي:
+                            </label>
+                            <select
+                              value={newItemCard.dosage_form}
+                              onChange={(e) => setNewItemCard({ ...newItemCard, dosage_form: e.target.value })}
+                              className="outstock-form-select"
+                              style={{ minHeight: '36px' }}
+                            >
+                              {['أقراص', 'كبسولات', 'شراب', 'معلق', 'أمبولات', 'فيال', 'مرهم', 'كريم', 'جل', 'نقط عين', 'نقط أذن', 'نقط أنف', 'بخاخ', 'فوار / أكياس', 'لبوس', 'محلول'].map((df) => (
+                                <option key={df} value={df}>{df}</option>
+                              ))}
+                            </select>
+                          </div>
+                        </div>
+
+                        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '10px' }}>
+                          <div>
+                            <label style={{ fontSize: '11.5px', fontWeight: '700', color: '#475569', display: 'block', marginBottom: '3px' }}>
+                              سعر الجمهور الرسمي (ج.م) * :
+                            </label>
+                            <input
+                              type="number"
+                              step="0.25"
+                              min="0"
+                              required
+                              placeholder="0.00"
+                              value={newItemCard.public_price}
+                              onChange={(e) => setNewItemCard({ ...newItemCard, public_price: e.target.value })}
+                              className="outstock-form-input"
+                              style={{ minHeight: '36px', fontWeight: 'bold', color: '#059669' }}
+                            />
+                          </div>
+                          <div>
+                            <label style={{ fontSize: '11.5px', fontWeight: '700', color: '#475569', display: 'block', marginBottom: '3px' }}>
+                              حجم العبوة (عدد الوحدات):
+                            </label>
+                            <input
+                              type="number"
+                              min="1"
+                              value={newItemCard.pack_size}
+                              onChange={(e) => setNewItemCard({ ...newItemCard, pack_size: parseInt(e.target.value, 10) || 1 })}
+                              className="outstock-form-input"
+                              style={{ minHeight: '36px' }}
+                            />
+                          </div>
+                          <div>
+                            <label style={{ fontSize: '11.5px', fontWeight: '700', color: '#475569', display: 'block', marginBottom: '3px' }}>
+                              وحدة البيع:
+                            </label>
+                            <select
+                              value={newItemCard.unit_name}
+                              onChange={(e) => setNewItemCard({ ...newItemCard, unit_name: e.target.value })}
+                              className="outstock-form-select"
+                              style={{ minHeight: '36px' }}
+                            >
+                              <option value="علبة">علبة 📦</option>
+                              <option value="شريط">شريط 💊</option>
+                              <option value="أمبول">أمبول 💉</option>
+                              <option value="زجاجة">زجاجة 🍾</option>
+                              <option value="قطعة">قطعة 🧴</option>
+                            </select>
+                          </div>
+                        </div>
+
+                        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px' }}>
+                          <div>
+                            <label style={{ fontSize: '11.5px', fontWeight: '700', color: '#475569', display: 'block', marginBottom: '3px' }}>
+                              المادة الفعالة:
+                            </label>
+                            <input
+                              type="text"
+                              placeholder="مثال: Paracetamol + Caffeine"
+                              value={newItemCard.active_ingredient}
+                              onChange={(e) => setNewItemCard({ ...newItemCard, active_ingredient: e.target.value })}
+                              className="outstock-form-input"
+                              style={{ minHeight: '36px' }}
+                            />
+                          </div>
+                          <div>
+                            <label style={{ fontSize: '11.5px', fontWeight: '700', color: '#475569', display: 'block', marginBottom: '3px' }}>
+                              التركيز:
+                            </label>
+                            <input
+                              type="text"
+                              placeholder="مثال: 500mg / 65mg"
+                              value={newItemCard.strength}
+                              onChange={(e) => setNewItemCard({ ...newItemCard, strength: e.target.value })}
+                              className="outstock-form-input"
+                              style={{ minHeight: '36px' }}
+                            />
+                          </div>
+                        </div>
+
+                        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px' }}>
+                          <div>
+                            <label style={{ fontSize: '11.5px', fontWeight: '700', color: '#475569', display: 'block', marginBottom: '3px' }}>
+                              الشركة المصنعة / الموزع:
+                            </label>
+                            <input
+                              type="text"
+                              placeholder="مثال: GlaxoSmithKline (GSK)"
+                              value={newItemCard.manufacturer}
+                              onChange={(e) => setNewItemCard({ ...newItemCard, manufacturer: e.target.value })}
+                              className="outstock-form-input"
+                              style={{ minHeight: '36px' }}
+                            />
+                          </div>
+                          <div>
+                            <label style={{ fontSize: '11.5px', fontWeight: '700', color: '#475569', display: 'block', marginBottom: '3px' }}>
+                              الباركود الدولي:
+                            </label>
+                            <input
+                              type="text"
+                              placeholder="مثال: 6221234567890"
+                              value={newItemCard.barcode}
+                              onChange={(e) => setNewItemCard({ ...newItemCard, barcode: e.target.value })}
+                              className="outstock-form-input"
+                              style={{ minHeight: '36px', fontFamily: 'monospace' }}
+                            />
+                          </div>
+                        </div>
+
+                        <div>
+                          <label style={{ fontSize: '11.5px', fontWeight: '700', color: '#475569', display: 'block', marginBottom: '3px' }}>
+                            ظروف التخزين:
+                          </label>
+                          <select
+                            value={newItemCard.storage_condition}
+                            onChange={(e) => setNewItemCard({ ...newItemCard, storage_condition: e.target.value })}
+                            className="outstock-form-select"
+                            style={{ minHeight: '36px' }}
+                          >
+                            <option value="room_temp">درجة حرارة الغرفة (أقل من 30 درجة مئوية) 🌡️</option>
+                            <option value="fridge">ثلاجة (2 - 8 درجات مئوية) ❄️</option>
+                          </select>
+                        </div>
+                      </>
+                    ) : (
+                      /* حقول مستحضرات التجميل الكاملة */
+                      <>
+                        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px' }}>
+                          <div>
+                            <label style={{ fontSize: '11.5px', fontWeight: '700', color: '#475569', display: 'block', marginBottom: '3px' }}>
+                              اسم المنتج (عربي) * :
+                            </label>
+                            <input
+                              type="text"
+                              required
+                              placeholder="مثال: لاروش بوزيه إيفاكلار غسول"
+                              value={newItemCard.trade_name_ar}
+                              onChange={(e) => {
+                                setNewItemCard({ ...newItemCard, trade_name_ar: e.target.value });
+                                setMedicationName(e.target.value);
+                              }}
+                              className="outstock-form-input"
+                              style={{ minHeight: '36px' }}
+                            />
+                          </div>
+                          <div>
+                            <label style={{ fontSize: '11.5px', fontWeight: '700', color: '#475569', display: 'block', marginBottom: '3px' }}>
+                              اسم المنتج (إنجليزي):
+                            </label>
+                            <input
+                              type="text"
+                              placeholder="مثال: La Roche-Posay Effaclar Gel"
+                              value={newItemCard.trade_name_en}
+                              onChange={(e) => setNewItemCard({ ...newItemCard, trade_name_en: e.target.value })}
+                              className="outstock-form-input"
+                              style={{ minHeight: '36px' }}
+                            />
+                          </div>
+                        </div>
+
+                        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px' }}>
+                          <div>
+                            <label style={{ fontSize: '11.5px', fontWeight: '700', color: '#475569', display: 'block', marginBottom: '3px' }}>
+                              البراند / الماركة * :
+                            </label>
+                            <input
+                              type="text"
+                              required
+                              placeholder="مثال: La Roche-Posay / Cerave / Vichy"
+                              value={newItemCard.brand}
+                              onChange={(e) => setNewItemCard({ ...newItemCard, brand: e.target.value })}
+                              className="outstock-form-input"
+                              style={{ minHeight: '36px' }}
+                            />
+                          </div>
+                          <div>
+                            <label style={{ fontSize: '11.5px', fontWeight: '700', color: '#475569', display: 'block', marginBottom: '3px' }}>
+                              التصنيف:
+                            </label>
+                            <select
+                              value={newItemCard.category}
+                              onChange={(e) => setNewItemCard({ ...newItemCard, category: e.target.value })}
+                              className="outstock-form-select"
+                              style={{ minHeight: '36px' }}
+                            >
+                              {['عناية بالبشرة', 'عناية بالشعر', 'واقي شمس', 'مرطبات', 'تفتيح ونضارة', 'عناية بالطفل', 'مكياج وتجميل', 'عطور ومزيلات عرق', 'عناية شخصية'].map((cat) => (
+                                <option key={cat} value={cat}>{cat}</option>
+                              ))}
+                            </select>
+                          </div>
+                        </div>
+
+                        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '10px' }}>
+                          <div>
+                            <label style={{ fontSize: '11.5px', fontWeight: '700', color: '#475569', display: 'block', marginBottom: '3px' }}>
+                              سعر الجمهور (ج.م) * :
+                            </label>
+                            <input
+                              type="number"
+                              step="0.5"
+                              min="0"
+                              required
+                              placeholder="0.00"
+                              value={newItemCard.public_price}
+                              onChange={(e) => setNewItemCard({ ...newItemCard, public_price: e.target.value })}
+                              className="outstock-form-input"
+                              style={{ minHeight: '36px', fontWeight: 'bold', color: '#be185d' }}
+                            />
+                          </div>
+                          <div>
+                            <label style={{ fontSize: '11.5px', fontWeight: '700', color: '#475569', display: 'block', marginBottom: '3px' }}>
+                              الحجم / السعة:
+                            </label>
+                            <input
+                              type="text"
+                              placeholder="مثال: 200ml / 50g"
+                              value={newItemCard.size_volume}
+                              onChange={(e) => setNewItemCard({ ...newItemCard, size_volume: e.target.value })}
+                              className="outstock-form-input"
+                              style={{ minHeight: '36px' }}
+                            />
+                          </div>
+                          <div>
+                            <label style={{ fontSize: '11.5px', fontWeight: '700', color: '#475569', display: 'block', marginBottom: '3px' }}>
+                              نوع البشرة / الاستخدام:
+                            </label>
+                            <input
+                              type="text"
+                              placeholder="مثال: للبشرة الدهنية والحساسة"
+                              value={newItemCard.skin_type}
+                              onChange={(e) => setNewItemCard({ ...newItemCard, skin_type: e.target.value })}
+                              className="outstock-form-input"
+                              style={{ minHeight: '36px' }}
+                            />
+                          </div>
+                        </div>
+
+                        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px' }}>
+                          <div>
+                            <label style={{ fontSize: '11.5px', fontWeight: '700', color: '#475569', display: 'block', marginBottom: '3px' }}>
+                              الشركة / بلد المنشأ:
+                            </label>
+                            <input
+                              type="text"
+                              placeholder="مثال: France / L'Oréal"
+                              value={newItemCard.manufacturer}
+                              onChange={(e) => setNewItemCard({ ...newItemCard, manufacturer: e.target.value })}
+                              className="outstock-form-input"
+                              style={{ minHeight: '36px' }}
+                            />
+                          </div>
+                          <div>
+                            <label style={{ fontSize: '11.5px', fontWeight: '700', color: '#475569', display: 'block', marginBottom: '3px' }}>
+                              الباركود الدولي:
+                            </label>
+                            <input
+                              type="text"
+                              placeholder="الباركود..."
+                              value={newItemCard.barcode}
+                              onChange={(e) => setNewItemCard({ ...newItemCard, barcode: e.target.value })}
+                              className="outstock-form-input"
+                              style={{ minHeight: '36px', fontFamily: 'monospace' }}
+                            />
+                          </div>
+                        </div>
+                      </>
+                    )}
                   </div>
                 </div>
               )}
@@ -1745,12 +2575,20 @@ export default function ItemInquiryAndCorrectionTab({
               {/* ملاحظات واستفسار */}
               <div>
                 <label style={{ fontSize: '12.5px', fontWeight: '800', color: '#334155', display: 'block', marginBottom: '4px' }}>
-                  ملاحظات أو تفاصيل الاستفسار * :
+                  {newRequestType === 'correction'
+                    ? 'سبب طلب تصحيح بيانات الصنف * (إلزامي لتوثيق التعديل لإدارة المشتريات):'
+                    : newRequestType === 'new_item'
+                    ? 'ملاحظات إضافية حول الصنف الجديد ومصدر التسعيرة:'
+                    : 'ملاحظات أو تفاصيل الاستفسار:'}
                 </label>
                 <textarea
-                  rows={3}
-                  required
-                  placeholder="اكتب استفسارك بالتفصيل (مثل: هل الصنف متوفر حالياً لدى أي مورد؟ أو تم استلام تشغيلة بسعر جديد...)"
+                  rows={2}
+                  required={newRequestType === 'correction'}
+                  placeholder={
+                    newRequestType === 'correction'
+                      ? 'اكتب سبب التعديل بدقة (مثل: منشور تسعيرة رسمي جديد من هيئة الدواء، تصحيح عدد أشرطة العبوة، تحديث الباركود)...'
+                      : 'اكتب أي ملاحظات للمشتريات...'
+                  }
                   value={notes}
                   onChange={(e) => setNotes(e.target.value)}
                   className="outstock-form-input"
@@ -1758,11 +2596,17 @@ export default function ItemInquiryAndCorrectionTab({
                 />
               </div>
 
-              {/* إرفاق صورة للصنف أو الروشتة */}
+              {/* إرفاق صورة للصنف أو الروشتة أو مستند التسعيرة */}
               <div>
                 <label style={{ fontSize: '12.5px', fontWeight: '800', color: '#334155', display: 'flex', alignItems: 'center', gap: '6px', marginBottom: '6px' }}>
                   <Camera size={16} color="#0284c7" />
-                  <span>إرفاق صورة للصنف أو الروشتة (اختياري):</span>
+                  <span>
+                    {newRequestType === 'correction'
+                      ? 'إرفاق صورة للعبوة أو مستند التسعيرة / الباركود (اختياري ومستحسن):'
+                      : newRequestType === 'new_item'
+                      ? 'إرفاق صورة عبوة الصنف الجديد والباركود:'
+                      : 'إرفاق صورة للصنف أو الروشتة (اختياري):'}
+                  </span>
                 </label>
                 <div style={{ display: 'flex', alignItems: 'center', gap: '10px', flexWrap: 'wrap' }}>
                   <label
@@ -1845,9 +2689,21 @@ export default function ItemInquiryAndCorrectionTab({
                   type="submit"
                   disabled={isSubmitting}
                   className="outstock-btn outstock-btn-primary"
-                  style={{ background: 'linear-gradient(135deg, #0284c7 0%, #0369a1 100%)' }}
+                  style={{
+                    background: newRequestType === 'correction'
+                      ? 'linear-gradient(135deg, #b45309 0%, #d97706 100%)'
+                      : newRequestType === 'new_item'
+                      ? 'linear-gradient(135deg, #059669 0%, #047857 100%)'
+                      : 'linear-gradient(135deg, #0284c7 0%, #0369a1 100%)'
+                  }}
                 >
-                  {isSubmitting ? 'جاري الإرسال...' : 'إرسال للمشتريات ✉️'}
+                  {isSubmitting
+                    ? 'جاري الإرسال...'
+                    : newRequestType === 'correction'
+                    ? 'إرسال طلب التصحيح للمشتريات 📝'
+                    : newRequestType === 'new_item'
+                    ? 'إرسال طلب اعتماد الصنف الجديد 🌟'
+                    : 'إرسال الاستعلام للمشتريات ✉️'}
                 </button>
               </div>
             </form>
@@ -1866,244 +2722,868 @@ export default function ItemInquiryAndCorrectionTab({
           onClick={() => !isReplying && setReplyTargetRequest(null)}
           style={{ position: 'fixed', inset: 0, background: 'rgba(15,23,42,0.75)', zIndex: 9999, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '16px' }}
         >
-          <div
-            className="outstock-modal-panel"
-            onClick={(e) => e.stopPropagation()}
-            style={{ maxWidth: '680px', width: '100%', background: '#ffffff', borderRadius: '18px', overflow: 'hidden' }}
-          >
-            <div style={{ padding: '16px 20px', background: 'linear-gradient(135deg, #0d9488 0%, #0f766e 100%)', color: '#ffffff', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-              <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                <Pill size={20} />
-                <h3 style={{ margin: 0, fontSize: '16px', fontWeight: '800' }}>
-                  رد إدارة المشتريات وتسعير الأصناف: {replyTargetRequest.medication_name}
-                </h3>
-              </div>
-              <button
-                type="button"
-                onClick={() => setReplyTargetRequest(null)}
-                style={{ background: 'transparent', border: 'none', color: '#ffffff', cursor: 'pointer' }}
-              >
-                <X size={18} />
-              </button>
-            </div>
-
-            <div style={{ padding: '20px', display: 'flex', flexDirection: 'column', gap: '14px', maxHeight: '80vh', overflowY: 'auto' }}>
-              <div>
-                <label style={{ fontSize: '12.5px', fontWeight: '800', color: '#334155', display: 'block', marginBottom: '6px' }}>
-                  تحديث حالة المعاملة:
-                </label>
-                <select
-                  value={replyStatus}
-                  onChange={(e) => setReplyStatus(e.target.value)}
-                  className="outstock-form-select"
-                  style={{ fontWeight: 'bold' }}
-                >
-                  <option value="resolved">✅ تم الرد والمعالجة بنجاح</option>
-                  <option value="approved">⭐ معتمد رسمياً</option>
-                  <option value="rejected">❌ رفض الطلب</option>
-                </select>
-              </div>
-
-              {/* 📋 جدول الأصناف للتسعير وتحديد إمكانية التوفير 📋 */}
-              <div>
-                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '8px' }}>
-                  <label style={{ fontSize: '13px', fontWeight: '800', color: '#0f172a', display: 'flex', alignItems: 'center', gap: '6px' }}>
-                    <Pill size={16} color="#0284c7" />
-                    <span>جدول الأصناف لتحديد السعر وإمكانية التوفير:</span>
-                  </label>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setReplyItems((prev) => [
-                        ...prev,
-                        { medicationName: '', quantity: 1, unit: 'علبة', price: '', isAvailable: true, notes: '' }
-                      ]);
-                    }}
-                    style={{
-                      background: '#eff6ff',
-                      color: '#0284c7',
-                      border: '1px solid #bfdbfe',
-                      borderRadius: '6px',
-                      padding: '4px 10px',
-                      fontSize: '11px',
-                      fontWeight: '800',
-                      cursor: 'pointer'
-                    }}
-                  >
-                    + إضافة صنف / بديل إضافي
-                  </button>
+          {replyTargetRequest.request_type === 'correction' ? (
+            /* ══════════════════════════════════════════════════════════════════ */
+            /* ── 1. نموذج رد المشتريات: مراجعة وتدقيق طلب تصحيح بيانات الصنف ── */
+            /* ══════════════════════════════════════════════════════════════════ */
+            <div
+              className="outstock-modal-panel"
+              onClick={(e) => e.stopPropagation()}
+              style={{ maxWidth: '840px', width: '100%', background: '#ffffff', borderRadius: '18px', overflow: 'hidden', boxShadow: '0 25px 50px -12px rgba(0,0,0,0.35)' }}
+            >
+              <div style={{ padding: '16px 20px', background: 'linear-gradient(135deg, #b45309 0%, #d97706 100%)', color: '#ffffff', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                  <FileEdit size={22} />
+                  <div>
+                    <h3 style={{ margin: 0, fontSize: '16px', fontWeight: '800' }}>
+                      تدقيق واعتماد تصحيح بيانات الصنف: {replyTargetRequest.medication_name}
+                    </h3>
+                    <div style={{ fontSize: '11.5px', opacity: 0.9, marginTop: '2px' }}>
+                      مقارنة دقيقة بين البيانات الحالية بالكتالوج والتعديل المقترح من الفرع
+                    </div>
+                  </div>
                 </div>
-
-                <div style={{ border: '1px solid #cbd5e1', borderRadius: '10px', overflow: 'hidden' }}>
-                  <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '12px', textAlign: 'right' }}>
-                    <thead>
-                      <tr style={{ background: '#f1f5f9', color: '#475569', borderBottom: '1px solid #cbd5e1' }}>
-                        <th style={{ padding: '8px 10px', fontWeight: 800 }}>الصنف الدوائي</th>
-                        <th style={{ padding: '8px 8px', fontWeight: 800, width: '90px' }}>الكمية</th>
-                        <th style={{ padding: '8px 8px', fontWeight: 800, width: '125px', textAlign: 'center' }}>سعر الصنف (ج.م)</th>
-                        <th style={{ padding: '8px 8px', fontWeight: 800, width: '135px', textAlign: 'center' }}>إمكانية التوفير</th>
-                        <th style={{ padding: '8px 6px', fontWeight: 800, width: '32px' }}></th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {replyItems.map((itemRow, idx) => (
-                        <tr key={idx} style={{ borderBottom: '1px solid #f1f5f9', background: itemRow.isAvailable ? '#ffffff' : '#fff5f5' }}>
-                          <td style={{ padding: '8px 10px' }}>
-                            <input
-                              type="text"
-                              value={itemRow.medicationName}
-                              onChange={(e) => {
-                                const val = e.target.value;
-                                setReplyItems((prev) => prev.map((it, i) => (i === idx ? { ...it, medicationName: val } : it)));
-                              }}
-                              placeholder="اسم الصنف..."
-                              className="outstock-form-input"
-                              style={{ minHeight: '32px', fontSize: '12px', fontWeight: 'bold' }}
-                            />
-                            <input
-                              type="text"
-                              value={itemRow.notes || ''}
-                              onChange={(e) => {
-                                const val = e.target.value;
-                                setReplyItems((prev) => prev.map((it, i) => (i === idx ? { ...it, notes: val } : it)));
-                              }}
-                              placeholder="ملاحظات المشتريات / البديل المقترح..."
-                              className="outstock-form-input"
-                              style={{ minHeight: '26px', fontSize: '11px', marginTop: '4px', color: '#64748b' }}
-                            />
-                          </td>
-                          <td style={{ padding: '8px 6px' }}>
-                            <div style={{ display: 'flex', flexDirection: 'column', gap: '3px' }}>
-                              <input
-                                type="number"
-                                min="1"
-                                value={itemRow.quantity}
-                                onChange={(e) => {
-                                  const val = parseInt(e.target.value, 10) || 1;
-                                  setReplyItems((prev) => prev.map((it, i) => (i === idx ? { ...it, quantity: val } : it)));
-                                }}
-                                className="outstock-form-input"
-                                style={{ minHeight: '30px', fontSize: '11.5px', textAlign: 'center' }}
-                              />
-                              <span style={{ fontSize: '10.5px', color: '#64748b', textAlign: 'center' }}>{itemRow.unit || 'علبة'}</span>
-                            </div>
-                          </td>
-                          <td style={{ padding: '8px 6px', textAlign: 'center' }}>
-                            <div style={{ position: 'relative' }}>
-                              <input
-                                type="number"
-                                step="0.5"
-                                min="0"
-                                placeholder="0.00"
-                                value={itemRow.price}
-                                onChange={(e) => {
-                                  const val = e.target.value;
-                                  setReplyItems((prev) => prev.map((it, i) => (i === idx ? { ...it, price: val } : it)));
-                                }}
-                                className="outstock-form-input"
-                                style={{ minHeight: '32px', fontSize: '12.5px', fontWeight: '800', textAlign: 'center', color: '#15803d', borderColor: '#86efac' }}
-                              />
-                              <span style={{ position: 'absolute', left: '6px', top: '7px', fontSize: '10px', color: '#64748b' }}>ج.م</span>
-                            </div>
-                          </td>
-                          <td style={{ padding: '8px 6px', textAlign: 'center' }}>
-                            <button
-                              type="button"
-                              onClick={() => {
-                                setReplyItems((prev) => prev.map((it, i) => (i === idx ? { ...it, isAvailable: !it.isAvailable } : it)));
-                              }}
-                              style={{
-                                width: '100%',
-                                minHeight: '32px',
-                                borderRadius: '6px',
-                                border: itemRow.isAvailable ? '1.5px solid #10b981' : '1.5px solid #ef4444',
-                                background: itemRow.isAvailable ? '#ecfdf5' : '#fef2f2',
-                                color: itemRow.isAvailable ? '#065f46' : '#991b1b',
-                                fontSize: '11px',
-                                fontWeight: '800',
-                                cursor: 'pointer',
-                                display: 'inline-flex',
-                                alignItems: 'center',
-                                justifyContent: 'center',
-                                gap: '3px',
-                                transition: 'all 0.15s ease'
-                              }}
-                              title="انقر لتبديل حالة التوفير"
-                            >
-                              {itemRow.isAvailable ? (
-                                <>
-                                  <CheckCircle2 size={13} color="#10b981" />
-                                  <span>متاح للتوفير 🟢</span>
-                                </>
-                              ) : (
-                                <>
-                                  <AlertCircle size={13} color="#ef4444" />
-                                  <span>غير متاح 🔴</span>
-                                </>
-                              )}
-                            </button>
-                          </td>
-                          <td style={{ padding: '8px 6px', textAlign: 'center' }}>
-                            {replyItems.length > 1 && (
-                              <button
-                                type="button"
-                                onClick={() => {
-                                  setReplyItems((prev) => prev.filter((_, i) => i !== idx));
-                                }}
-                                style={{
-                                  background: 'transparent',
-                                  border: 'none',
-                                  color: '#ef4444',
-                                  cursor: 'pointer',
-                                  padding: '4px'
-                                }}
-                                title="حذف هذا الصنف"
-                              >
-                                <Trash2 size={15} />
-                              </button>
-                            )}
-                          </td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
-              </div>
-
-              <div>
-                <label style={{ fontSize: '12.5px', fontWeight: '800', color: '#334155', display: 'block', marginBottom: '6px' }}>
-                  نص تعليق رد المشتريات العام وتوجيهات الفرع:
-                </label>
-                <textarea
-                  rows={3}
-                  placeholder="مثال: الصنف متوفر لدى شركة ابن سينا بخصم 20%، السعر الرسمي الجديد 45 ج.م وتم تحديثه..."
-                  value={replyNotes}
-                  onChange={(e) => setReplyNotes(e.target.value)}
-                  className="outstock-form-input"
-                  style={{ resize: 'vertical' }}
-                />
-              </div>
-
-              <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '10px', marginTop: '10px' }}>
                 <button
                   type="button"
                   onClick={() => setReplyTargetRequest(null)}
-                  disabled={isReplying}
-                  className="outstock-btn outstock-btn-secondary"
+                  style={{ background: 'transparent', border: 'none', color: '#ffffff', cursor: 'pointer' }}
                 >
-                  إلغاء
-                </button>
-                <button
-                  type="button"
-                  onClick={handleSendReply}
-                  disabled={isReplying}
-                  className="outstock-btn outstock-btn-primary"
-                >
-                  {isReplying ? 'جاري الحفظ...' : 'حفظ وإرسال الرد للفرع'}
+                  <X size={20} />
                 </button>
               </div>
+
+              <div style={{ padding: '20px', display: 'flex', flexDirection: 'column', gap: '16px', maxHeight: '82vh', overflowY: 'auto' }}>
+                {/* شريط معلومات الفرع والطلب */}
+                <div style={{ background: '#fffbeb', border: '1px solid #fde68a', borderRadius: '10px', padding: '12px 14px', display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: '10px', fontSize: '12px' }}>
+                  <div>
+                    <span style={{ color: '#92400e', fontWeight: '700' }}>🏢 الفرع الطالب: </span>
+                    <span style={{ fontWeight: '800', color: '#1e293b' }}>{replyTargetRequest.branch_name || 'فرع الصيدلية'}</span>
+                  </div>
+                  <div>
+                    <span style={{ color: '#92400e', fontWeight: '700' }}>👤 الصيدلي: </span>
+                    <span style={{ fontWeight: '800', color: '#1e293b' }}>{replyTargetRequest.employee_name || replyTargetRequest.requested_by || 'صيدلي الفرع'}</span>
+                  </div>
+                  <div>
+                    <span style={{ color: '#92400e', fontWeight: '700' }}>🕒 تاريخ الطلب: </span>
+                    <span style={{ fontWeight: '700', color: '#475569' }}>
+                      {replyTargetRequest.created_at ? new Date(replyTargetRequest.created_at).toLocaleString('ar-EG') : 'الآن'}
+                    </span>
+                  </div>
+                  <div style={{ gridColumn: '1 / -1', borderTop: '1px dashed #fde68a', paddingTop: '8px', display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: '8px' }}>
+                    <div>
+                      <span style={{ color: '#92400e', fontWeight: '800' }}>📝 سبب طلب التصحيح: </span>
+                      <span style={{ color: '#78350f', fontWeight: '700' }}>
+                        {replyTargetRequest.pharmacist_notes || replyTargetRequest.notes || 'لم يحدد سبب نصي'}
+                      </span>
+                    </div>
+                    {replyTargetRequest.attachment_url && (
+                      <button
+                        type="button"
+                        onClick={() => setPreviewImageUrl(replyTargetRequest.attachment_url)}
+                        className="outstock-btn"
+                        style={{ padding: '4px 10px', fontSize: '11px', background: '#ffffff', border: '1px solid #f59e0b', color: '#b45309', display: 'inline-flex', alignItems: 'center', gap: '5px' }}
+                      >
+                        <Camera size={13} />
+                        <span>معاينة صورة المستند / العبوة 📷</span>
+                      </button>
+                    )}
+                  </div>
+                </div>
+
+                {/* جدول مقارنة الفروق Side-by-Side Diff Table */}
+                <div>
+                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '8px' }}>
+                    <div style={{ fontSize: '13px', fontWeight: '800', color: '#0f172a', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                      <Layers size={16} color="#d97706" />
+                      <span>جدول مقارنة البيانات (القديم المخزن بالكتالوج vs التعديل المقترح):</span>
+                    </div>
+                    <span style={{ fontSize: '11px', color: '#64748b' }}>
+                      💡 يمكنك تعديل وتدقيق القيم المقترحة مباشرة قبل اعتمادها
+                    </span>
+                  </div>
+
+                  <div style={{ border: '1px solid #e2e8f0', borderRadius: '10px', overflow: 'hidden' }}>
+                    <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '12px', textAlign: 'right' }}>
+                      <thead>
+                        <tr style={{ background: '#f8fafc', color: '#475569', borderBottom: '2px solid #e2e8f0' }}>
+                          <th style={{ padding: '9px 12px', fontWeight: '800', width: '25%' }}>البيان / الحقل</th>
+                          <th style={{ padding: '9px 12px', fontWeight: '800', width: '32%', background: '#f1f5f9' }}>
+                            القيمة الحالية المخزنة بالنظام
+                          </th>
+                          <th style={{ padding: '9px 12px', fontWeight: '800', width: '33%' }}>
+                            التعديل المقترح (قابل للتدقيق)
+                          </th>
+                          <th style={{ padding: '9px 10px', fontWeight: '800', width: '10%', textAlign: 'center' }}>
+                            الحالة
+                          </th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {(() => {
+                          const oldV = replyTargetRequest.proposed_data?.old_values || {};
+                          const newV = correctionEditableNewVals || replyTargetRequest.proposed_data?.new_values || {};
+                          const isCosm = replyTargetRequest.item_type === 'cosmetics' || replyTargetRequest.proposed_data?.item_category === 'cosmetics';
+
+                          const fieldsList = isCosm
+                            ? [
+                                { key: 'trade_name_ar', label: 'اسم المنتج (عربي)', icon: '💄' },
+                                { key: 'trade_name_en', label: 'اسم المنتج (إنجليزي)', icon: '🔤' },
+                                { key: 'public_price', label: 'سعر الجمهور الرسمي (ج.م)', icon: '💰', isNumeric: true },
+                                { key: 'dosage_form', label: 'التصنيف / النوع', icon: '🧴' },
+                                { key: 'pack_size', label: 'حجم العبوة (الحجم/السعة)', icon: '📦' },
+                                { key: 'unit_name', label: 'الوحدة الصغرى', icon: '📏' },
+                                { key: 'manufacturer', label: 'البراند / الماركة', icon: '🏢' },
+                                { key: 'barcode', label: 'الباركود الدولي', icon: '📊' }
+                              ]
+                            : [
+                                { key: 'trade_name_ar', label: 'اسم الصنف (عربي)', icon: '💊' },
+                                { key: 'trade_name_en', label: 'اسم الصنف (إنجليزي)', icon: '🔤' },
+                                { key: 'invoice_display_name', label: 'الاسم المطبوع بالفاتورة', icon: '🧾' },
+                                { key: 'public_price', label: 'سعر الجمهور الرسمي (ج.م)', icon: '💰', isNumeric: true },
+                                { key: 'dosage_form', label: 'الشكل الصيدلي', icon: '🧪' },
+                                { key: 'pack_size', label: 'حجم العبوة (أشرطة/وحدات)', icon: '📦', isNumeric: true },
+                                { key: 'unit_name', label: 'اسم الوحدة الصغرى', icon: '📏' },
+                                { key: 'strength', label: 'التركيز', icon: '⚡' },
+                                { key: 'active_ingredient', label: 'المادة الفعالة', icon: '🔬' },
+                                { key: 'manufacturer', label: 'الشركة المصنعة / الموزع', icon: '🏢' },
+                                { key: 'barcode', label: 'الباركود الدولي', icon: '📊' }
+                              ];
+
+                          return fieldsList.map((fld) => {
+                            const oldVal = oldV[fld.key] !== undefined && oldV[fld.key] !== null ? String(oldV[fld.key]) : '';
+                            const newVal = newV[fld.key] !== undefined && newV[fld.key] !== null ? String(newV[fld.key]) : '';
+                            const isChanged = oldVal.trim() !== newVal.trim() && newVal.trim() !== '';
+
+                            return (
+                              <tr
+                                key={fld.key}
+                                style={{
+                                  borderBottom: '1px solid #f1f5f9',
+                                  background: isChanged ? '#fffbeb' : '#ffffff',
+                                  transition: 'background 0.2s ease'
+                                }}
+                              >
+                                <td style={{ padding: '8px 12px', fontWeight: '700', color: '#334155' }}>
+                                  <span style={{ marginLeft: '6px' }}>{fld.icon}</span>
+                                  {fld.label}
+                                </td>
+                                <td style={{ padding: '8px 12px', background: '#f8fafc', color: '#475569', fontFamily: fld.isNumeric ? 'monospace' : 'inherit' }}>
+                                  {oldVal || <span style={{ color: '#94a3b8', fontStyle: 'italic' }}>غير محدد</span>}
+                                </td>
+                                <td style={{ padding: '6px 12px' }}>
+                                  <input
+                                    type={fld.isNumeric ? 'number' : 'text'}
+                                    step={fld.key === 'public_price' ? '0.5' : undefined}
+                                    value={newV[fld.key] !== undefined ? newV[fld.key] : ''}
+                                    onChange={(e) => {
+                                      const val = e.target.value;
+                                      setCorrectionEditableNewVals((prev) => ({
+                                        ...(prev || {}),
+                                        [fld.key]: val
+                                      }));
+                                    }}
+                                    placeholder={oldVal || 'القيمة الجديدة...'}
+                                    className="outstock-form-input"
+                                    style={{
+                                      minHeight: '30px',
+                                      fontSize: '12px',
+                                      fontWeight: isChanged ? '800' : 'normal',
+                                      color: isChanged ? '#b45309' : '#1e293b',
+                                      borderColor: isChanged ? '#f59e0b' : '#cbd5e1',
+                                      background: isChanged ? '#ffffff' : '#fcfdfe'
+                                    }}
+                                  />
+                                </td>
+                                <td style={{ padding: '8px 10px', textAlign: 'center' }}>
+                                  {isChanged ? (
+                                    <span style={{ fontSize: '10.5px', fontWeight: '800', background: '#fef3c7', color: '#b45309', padding: '2px 6px', borderRadius: '4px', border: '1px solid #fde68a' }}>
+                                      ⚡ مُعدل
+                                    </span>
+                                  ) : (
+                                    <span style={{ fontSize: '10.5px', color: '#94a3b8' }}>مطابق</span>
+                                  )}
+                                </td>
+                              </tr>
+                            );
+                          });
+                        })()}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+
+                {/* ملاحظات المشتريات */}
+                <div>
+                  <label style={{ fontSize: '12px', fontWeight: '700', color: '#334155', display: 'block', marginBottom: '4px' }}>
+                    ملاحظات إضافية وتوجيهات للفرع (اختياري):
+                  </label>
+                  <textarea
+                    rows={2}
+                    placeholder="اكتب أي ملاحظات للفرع أو توجيهات حول تسعير وتوفير الصنف..."
+                    value={replyNotes}
+                    onChange={(e) => setReplyNotes(e.target.value)}
+                    className="outstock-form-input"
+                    style={{ resize: 'vertical' }}
+                  />
+                </div>
+
+                {/* صندوق إدخال سبب الخطأ عند النقر على "التعديل المرسل خطأ" */}
+                {showRejectBox && (
+                  <div style={{ background: '#fef2f2', border: '1.5px solid #f87171', borderRadius: '10px', padding: '14px', display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '6px', color: '#991b1b', fontWeight: '800', fontSize: '13px' }}>
+                      <AlertTriangle size={16} />
+                      <span>سبب الخطأ في التعديل المرسل (إلزامي لإشعار الفرع به):</span>
+                    </div>
+                    <textarea
+                      rows={2}
+                      required
+                      placeholder="وضح سبب خطأ التعديل بدقة للفرع (مثال: التسعيرة الرسمية للعلبة لا تزال 45 ج.م حسب منشور الإدارة المركزية للشؤون الصيدلية، أو عدد الأشرطة بالكتالوج سليم)..."
+                      value={correctionRejectionReason}
+                      onChange={(e) => setCorrectionRejectionReason(e.target.value)}
+                      className="outstock-form-input"
+                      style={{ borderColor: '#ef4444', background: '#ffffff', color: '#7f1d1d' }}
+                      autoFocus
+                    />
+                    <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '8px', marginTop: '4px' }}>
+                      <button
+                        type="button"
+                        onClick={() => setShowRejectBox(false)}
+                        className="outstock-btn outstock-btn-secondary"
+                        style={{ padding: '6px 12px', fontSize: '11.5px' }}
+                      >
+                        إلغاء التراجع
+                      </button>
+                      <button
+                        type="button"
+                        onClick={handleRejectCorrection}
+                        disabled={isReplying || !correctionRejectionReason.trim()}
+                        className="outstock-btn"
+                        style={{ background: '#dc2626', color: '#ffffff', padding: '6px 14px', fontSize: '12px', fontWeight: '800' }}
+                      >
+                        {isReplying ? 'جاري الإرسال...' : 'تأكيد إشعار الفرع بأن التعديل خطأ ❌'}
+                      </button>
+                    </div>
+                  </div>
+                )}
+
+                {/* شريط القرارات الصريحة المطلوبة */}
+                {!showRejectBox && (
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: '6px', paddingTop: '12px', borderTop: '1px solid #e2e8f0', flexWrap: 'wrap', gap: '10px' }}>
+                    <button
+                      type="button"
+                      onClick={() => setReplyTargetRequest(null)}
+                      disabled={isReplying}
+                      className="outstock-btn outstock-btn-secondary"
+                    >
+                      إغلاق
+                    </button>
+
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                      <button
+                        type="button"
+                        onClick={() => setShowRejectBox(true)}
+                        disabled={isReplying}
+                        className="outstock-btn"
+                        style={{
+                          background: '#fff1f2',
+                          color: '#be123c',
+                          border: '1.5px solid #fecdd3',
+                          fontWeight: '800',
+                          display: 'inline-flex',
+                          alignItems: 'center',
+                          gap: '6px'
+                        }}
+                      >
+                        <XCircle size={16} />
+                        <span>التعديل المرسل خطأ ❌</span>
+                      </button>
+
+                      <button
+                        type="button"
+                        onClick={handleApproveCorrection}
+                        disabled={isReplying}
+                        className="outstock-btn"
+                        style={{
+                          background: 'linear-gradient(135deg, #059669 0%, #047857 100%)',
+                          color: '#ffffff',
+                          fontWeight: '800',
+                          display: 'inline-flex',
+                          alignItems: 'center',
+                          gap: '6px',
+                          boxShadow: '0 4px 12px rgba(5, 150, 105, 0.25)'
+                        }}
+                      >
+                        <CheckCircle size={16} />
+                        <span>{isReplying ? 'جاري الاعتماد والتطبيق...' : 'تم التعديل واعتماد البيانات بالكتالوج ✅'}</span>
+                      </button>
+                    </div>
+                  </div>
+                )}
+              </div>
             </div>
-          </div>
+          ) : replyTargetRequest.request_type === 'new_item' ? (
+            /* ══════════════════════════════════════════════════════════════════ */
+            /* ── 2. نموذج رد المشتريات: مراجعة واعتماد إضافة صنف جديد بالكتالوج ── */
+            /* ══════════════════════════════════════════════════════════════════ */
+            <div
+              className="outstock-modal-panel"
+              onClick={(e) => e.stopPropagation()}
+              style={{ maxWidth: '840px', width: '100%', background: '#ffffff', borderRadius: '18px', overflow: 'hidden', boxShadow: '0 25px 50px -12px rgba(0,0,0,0.35)' }}
+            >
+              <div style={{ padding: '16px 20px', background: 'linear-gradient(135deg, #059669 0%, #047857 100%)', color: '#ffffff', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                  <PackagePlus size={22} />
+                  <div>
+                    <h3 style={{ margin: 0, fontSize: '16px', fontWeight: '800' }}>
+                      تدقيق واعتماد إضافة صنف جديد بالكتالوج: {replyTargetRequest.medication_name}
+                    </h3>
+                    <div style={{ fontSize: '11.5px', opacity: 0.9, marginTop: '2px' }}>
+                      مراجعة كارتة الصنف الرئيسية (Master Card) قبل حفظها وإشعار الفرع
+                    </div>
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setReplyTargetRequest(null)}
+                  style={{ background: 'transparent', border: 'none', color: '#ffffff', cursor: 'pointer' }}
+                >
+                  <X size={20} />
+                </button>
+              </div>
+
+              <div style={{ padding: '20px', display: 'flex', flexDirection: 'column', gap: '16px', maxHeight: '82vh', overflowY: 'auto' }}>
+                {/* شريط معلومات الطلب والفرع */}
+                <div style={{ background: '#f0fdf4', border: '1px solid #bbf7d0', borderRadius: '10px', padding: '12px 14px', display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: '10px', fontSize: '12px' }}>
+                  <div>
+                    <span style={{ color: '#166534', fontWeight: '700' }}>🏢 الفرع الطالب: </span>
+                    <span style={{ fontWeight: '800', color: '#1e293b' }}>{replyTargetRequest.branch_name || 'فرع الصيدلية'}</span>
+                  </div>
+                  <div>
+                    <span style={{ color: '#166534', fontWeight: '700' }}>👤 الصيدلي: </span>
+                    <span style={{ fontWeight: '800', color: '#1e293b' }}>{replyTargetRequest.employee_name || replyTargetRequest.requested_by || 'صيدلي الفرع'}</span>
+                  </div>
+                  <div>
+                    <span style={{ color: '#166534', fontWeight: '700' }}>🕒 تاريخ الطلب: </span>
+                    <span style={{ fontWeight: '700', color: '#475569' }}>
+                      {replyTargetRequest.created_at ? new Date(replyTargetRequest.created_at).toLocaleString('ar-EG') : 'الآن'}
+                    </span>
+                  </div>
+                  <div style={{ gridColumn: '1 / -1', borderTop: '1px dashed #bbf7d0', paddingTop: '8px', display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: '8px' }}>
+                    <div>
+                      <span style={{ color: '#166534', fontWeight: '800' }}>📝 ملاحظات الصيدلي ومصدر الصنف: </span>
+                      <span style={{ color: '#14532d', fontWeight: '700' }}>
+                        {replyTargetRequest.pharmacist_notes || replyTargetRequest.notes || 'لم يحدد ملاحظات'}
+                      </span>
+                    </div>
+                    {replyTargetRequest.attachment_url && (
+                      <button
+                        type="button"
+                        onClick={() => setPreviewImageUrl(replyTargetRequest.attachment_url)}
+                        className="outstock-btn"
+                        style={{ padding: '4px 10px', fontSize: '11px', background: '#ffffff', border: '1px solid #10b981', color: '#047857', display: 'inline-flex', alignItems: 'center', gap: '5px' }}
+                      >
+                        <Camera size={13} />
+                        <span>معاينة صورة الصنف / الباركود 📷</span>
+                      </button>
+                    )}
+                  </div>
+                </div>
+
+                {/* كارتة الصنف الرئيسية Master Card للتدقيق */}
+                <div>
+                  <div style={{ fontSize: '13px', fontWeight: '800', color: '#0f172a', display: 'flex', alignItems: 'center', gap: '6px', marginBottom: '8px' }}>
+                    <Pill size={16} color="#059669" />
+                    <span>مراجعة وتدقيق حقول كارتة الصنف (Master Card) قبل الحفظ بالكتالوج:</span>
+                  </div>
+
+                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px' }}>
+                    <div>
+                      <label style={{ fontSize: '11.5px', fontWeight: '700', color: '#475569', display: 'block', marginBottom: '3px' }}>
+                        الاسم التجاري (عربي) * :
+                      </label>
+                      <input
+                        type="text"
+                        value={newItemReplyData?.trade_name_ar || newItemReplyData?.arabicName || ''}
+                        onChange={(e) => {
+                          const val = e.target.value;
+                          setNewItemReplyData((prev) => ({ ...prev, trade_name_ar: val, arabicName: val }));
+                        }}
+                        className="outstock-form-input"
+                        style={{ minHeight: '34px', fontWeight: 'bold' }}
+                      />
+                    </div>
+                    <div>
+                      <label style={{ fontSize: '11.5px', fontWeight: '700', color: '#475569', display: 'block', marginBottom: '3px' }}>
+                        الاسم التجاري (إنجليزي) * :
+                      </label>
+                      <input
+                        type="text"
+                        value={newItemReplyData?.trade_name_en || newItemReplyData?.tradeName || ''}
+                        onChange={(e) => {
+                          const val = e.target.value;
+                          setNewItemReplyData((prev) => ({ ...prev, trade_name_en: val, tradeName: val }));
+                        }}
+                        className="outstock-form-input"
+                        style={{ minHeight: '34px', fontWeight: 'bold' }}
+                      />
+                    </div>
+                  </div>
+
+                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '10px', marginTop: '10px' }}>
+                    <div>
+                      <label style={{ fontSize: '11.5px', fontWeight: '700', color: '#475569', display: 'block', marginBottom: '3px' }}>
+                        سعر الجمهور الرسمي (ج.م) * :
+                      </label>
+                      <input
+                        type="number"
+                        step="0.5"
+                        min="0"
+                        value={newItemReplyData?.public_price || newItemReplyData?.price || ''}
+                        onChange={(e) => {
+                          const val = e.target.value;
+                          setNewItemReplyData((prev) => ({ ...prev, public_price: val, price: val }));
+                        }}
+                        className="outstock-form-input"
+                        style={{ minHeight: '34px', fontWeight: 'bold', color: '#15803d' }}
+                      />
+                    </div>
+                    <div>
+                      <label style={{ fontSize: '11.5px', fontWeight: '700', color: '#475569', display: 'block', marginBottom: '3px' }}>
+                        الشكل الصيدلي:
+                      </label>
+                      <input
+                        type="text"
+                        value={newItemReplyData?.dosage_form || newItemReplyData?.dosageForm || ''}
+                        onChange={(e) => {
+                          const val = e.target.value;
+                          setNewItemReplyData((prev) => ({ ...prev, dosage_form: val, dosageForm: val }));
+                        }}
+                        className="outstock-form-input"
+                        style={{ minHeight: '34px' }}
+                      />
+                    </div>
+                    <div>
+                      <label style={{ fontSize: '11.5px', fontWeight: '700', color: '#475569', display: 'block', marginBottom: '3px' }}>
+                        حجم العبوة (أشرطة/وحدات):
+                      </label>
+                      <input
+                        type="number"
+                        min="1"
+                        value={newItemReplyData?.pack_size || newItemReplyData?.packSize || 1}
+                        onChange={(e) => {
+                          const val = parseInt(e.target.value, 10) || 1;
+                          setNewItemReplyData((prev) => ({ ...prev, pack_size: val, packSize: val }));
+                        }}
+                        className="outstock-form-input"
+                        style={{ minHeight: '34px' }}
+                      />
+                    </div>
+                  </div>
+
+                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px', marginTop: '10px' }}>
+                    <div>
+                      <label style={{ fontSize: '11.5px', fontWeight: '700', color: '#475569', display: 'block', marginBottom: '3px' }}>
+                        المادة الفعالة:
+                      </label>
+                      <input
+                        type="text"
+                        value={newItemReplyData?.active_ingredient || newItemReplyData?.activeIngredients || ''}
+                        onChange={(e) => {
+                          const val = e.target.value;
+                          setNewItemReplyData((prev) => ({ ...prev, active_ingredient: val, activeIngredients: val }));
+                        }}
+                        className="outstock-form-input"
+                        style={{ minHeight: '34px' }}
+                      />
+                    </div>
+                    <div>
+                      <label style={{ fontSize: '11.5px', fontWeight: '700', color: '#475569', display: 'block', marginBottom: '3px' }}>
+                        التركيز:
+                      </label>
+                      <input
+                        type="text"
+                        value={newItemReplyData?.strength || ''}
+                        onChange={(e) => {
+                          const val = e.target.value;
+                          setNewItemReplyData((prev) => ({ ...prev, strength: val }));
+                        }}
+                        className="outstock-form-input"
+                        style={{ minHeight: '34px' }}
+                      />
+                    </div>
+                  </div>
+
+                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px', marginTop: '10px' }}>
+                    <div>
+                      <label style={{ fontSize: '11.5px', fontWeight: '700', color: '#475569', display: 'block', marginBottom: '3px' }}>
+                        الشركة المصنعة / الموزع:
+                      </label>
+                      <input
+                        type="text"
+                        value={newItemReplyData?.manufacturer || newItemReplyData?.company || ''}
+                        onChange={(e) => {
+                          const val = e.target.value;
+                          setNewItemReplyData((prev) => ({ ...prev, manufacturer: val, company: val }));
+                        }}
+                        className="outstock-form-input"
+                        style={{ minHeight: '34px' }}
+                      />
+                    </div>
+                    <div>
+                      <label style={{ fontSize: '11.5px', fontWeight: '700', color: '#475569', display: 'block', marginBottom: '3px' }}>
+                        الباركود الدولي:
+                      </label>
+                      <input
+                        type="text"
+                        value={newItemReplyData?.barcode || ''}
+                        onChange={(e) => {
+                          const val = e.target.value;
+                          setNewItemReplyData((prev) => ({ ...prev, barcode: val }));
+                        }}
+                        className="outstock-form-input"
+                        style={{ minHeight: '34px', fontFamily: 'monospace' }}
+                      />
+                    </div>
+                  </div>
+                </div>
+
+                {/* صندوق سبب الرفض عند النقر على "رفض إضافة الصنف" */}
+                {showRejectBox && (
+                  <div style={{ background: '#fef2f2', border: '1.5px solid #f87171', borderRadius: '10px', padding: '14px', display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '6px', color: '#991b1b', fontWeight: '800', fontSize: '13px' }}>
+                      <AlertTriangle size={16} />
+                      <span>سبب رفض إضافة الصنف (إلزامي لإشعار الفرع به):</span>
+                    </div>
+                    <textarea
+                      rows={2}
+                      required
+                      placeholder="وضح سبب رفض الصنف للفرع (مثال: صنف مهرب غير مسجل بهيئة الدواء، أو الصنف موجود بالفعل بالكتالوج باسم تجاري آخر)..."
+                      value={correctionRejectionReason}
+                      onChange={(e) => setCorrectionRejectionReason(e.target.value)}
+                      className="outstock-form-input"
+                      style={{ borderColor: '#ef4444', background: '#ffffff', color: '#7f1d1d' }}
+                      autoFocus
+                    />
+                    <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '8px', marginTop: '4px' }}>
+                      <button
+                        type="button"
+                        onClick={() => setShowRejectBox(false)}
+                        className="outstock-btn outstock-btn-secondary"
+                        style={{ padding: '6px 12px', fontSize: '11.5px' }}
+                      >
+                        إلغاء التراجع
+                      </button>
+                      <button
+                        type="button"
+                        onClick={handleRejectNewItem}
+                        disabled={isReplying || !correctionRejectionReason.trim()}
+                        className="outstock-btn"
+                        style={{ background: '#dc2626', color: '#ffffff', padding: '6px 14px', fontSize: '12px', fontWeight: '800' }}
+                      >
+                        {isReplying ? 'جاري الإرسال...' : 'تأكيد رفض إضافة الصنف ❌'}
+                      </button>
+                    </div>
+                  </div>
+                )}
+
+                {/* أزرار القرار */}
+                {!showRejectBox && (
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: '6px', paddingTop: '12px', borderTop: '1px solid #e2e8f0', flexWrap: 'wrap', gap: '10px' }}>
+                    <button
+                      type="button"
+                      onClick={() => setReplyTargetRequest(null)}
+                      disabled={isReplying}
+                      className="outstock-btn outstock-btn-secondary"
+                    >
+                      إغلاق
+                    </button>
+
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                      <button
+                        type="button"
+                        onClick={() => setShowRejectBox(true)}
+                        disabled={isReplying}
+                        className="outstock-btn"
+                        style={{
+                          background: '#fff1f2',
+                          color: '#be123c',
+                          border: '1.5px solid #fecdd3',
+                          fontWeight: '800',
+                          display: 'inline-flex',
+                          alignItems: 'center',
+                          gap: '6px'
+                        }}
+                      >
+                        <XCircle size={16} />
+                        <span>رفض إضافة الصنف ❌</span>
+                      </button>
+
+                      <button
+                        type="button"
+                        onClick={handleApproveNewItemWithData}
+                        disabled={isReplying}
+                        className="outstock-btn"
+                        style={{
+                          background: 'linear-gradient(135deg, #059669 0%, #047857 100%)',
+                          color: '#ffffff',
+                          fontWeight: '800',
+                          display: 'inline-flex',
+                          alignItems: 'center',
+                          gap: '6px',
+                          boxShadow: '0 4px 12px rgba(5, 150, 105, 0.25)'
+                        }}
+                      >
+                        <CheckCircle size={16} />
+                        <span>{isReplying ? 'جاري الاعتماد والإضافة...' : 'اعتماد وإضافة الصنف للكتالوج المركزي وإشعار الفرع 🚀'}</span>
+                      </button>
+                    </div>
+                  </div>
+                )}
+              </div>
+            </div>
+          ) : (
+            /* ══════════════════════════════════════════════════════════════════ */
+            /* ── 3. نموذج رد المشتريات: جدول تسعير وتوفير أصناف الاستعلام ── */
+            /* ══════════════════════════════════════════════════════════════════ */
+            <div
+              className="outstock-modal-panel"
+              onClick={(e) => e.stopPropagation()}
+              style={{ maxWidth: '680px', width: '100%', background: '#ffffff', borderRadius: '18px', overflow: 'hidden' }}
+            >
+              <div style={{ padding: '16px 20px', background: 'linear-gradient(135deg, #0d9488 0%, #0f766e 100%)', color: '#ffffff', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                  <Pill size={20} />
+                  <h3 style={{ margin: 0, fontSize: '16px', fontWeight: '800' }}>
+                    رد إدارة المشتريات وتسعير الأصناف: {replyTargetRequest.medication_name}
+                  </h3>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setReplyTargetRequest(null)}
+                  style={{ background: 'transparent', border: 'none', color: '#ffffff', cursor: 'pointer' }}
+                >
+                  <X size={18} />
+                </button>
+              </div>
+
+              <div style={{ padding: '20px', display: 'flex', flexDirection: 'column', gap: '14px', maxHeight: '80vh', overflowY: 'auto' }}>
+                <div>
+                  <label style={{ fontSize: '12.5px', fontWeight: '800', color: '#334155', display: 'block', marginBottom: '6px' }}>
+                    تحديث حالة المعاملة:
+                  </label>
+                  <select
+                    value={replyStatus}
+                    onChange={(e) => setReplyStatus(e.target.value)}
+                    className="outstock-form-select"
+                    style={{ fontWeight: 'bold' }}
+                  >
+                    <option value="resolved">✅ تم الرد والمعالجة بنجاح</option>
+                    <option value="approved">⭐ معتمد رسمياً</option>
+                    <option value="rejected">❌ رفض الطلب</option>
+                  </select>
+                </div>
+
+                {/* 📋 جدول الأصناف للتسعير وتحديد إمكانية التوفير 📋 */}
+                <div>
+                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '8px' }}>
+                    <label style={{ fontSize: '13px', fontWeight: '800', color: '#0f172a', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                      <Pill size={16} color="#0284c7" />
+                      <span>جدول الأصناف لتحديد السعر وإمكانية التوفير:</span>
+                    </label>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setReplyItems((prev) => [
+                          ...prev,
+                          { medicationName: '', quantity: 1, unit: 'علبة', price: '', isAvailable: true, notes: '' }
+                        ]);
+                      }}
+                      style={{
+                        background: '#eff6ff',
+                        color: '#0284c7',
+                        border: '1px solid #bfdbfe',
+                        borderRadius: '6px',
+                        padding: '4px 10px',
+                        fontSize: '11px',
+                        fontWeight: '800',
+                        cursor: 'pointer'
+                      }}
+                    >
+                      + إضافة صنف / بديل إضافي
+                    </button>
+                  </div>
+
+                  <div style={{ border: '1px solid #cbd5e1', borderRadius: '10px', overflow: 'hidden' }}>
+                    <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '12px', textAlign: 'right' }}>
+                      <thead>
+                        <tr style={{ background: '#f1f5f9', color: '#475569', borderBottom: '1px solid #cbd5e1' }}>
+                          <th style={{ padding: '8px 10px', fontWeight: 800 }}>الصنف الدوائي</th>
+                          <th style={{ padding: '8px 8px', fontWeight: 800, width: '90px' }}>الكمية</th>
+                          <th style={{ padding: '8px 8px', fontWeight: 800, width: '125px', textAlign: 'center' }}>سعر الصنف (ج.م)</th>
+                          <th style={{ padding: '8px 8px', fontWeight: 800, width: '135px', textAlign: 'center' }}>إمكانية التوفير</th>
+                          <th style={{ padding: '8px 6px', fontWeight: 800, width: '32px' }}></th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {replyItems.map((itemRow, idx) => (
+                          <tr key={idx} style={{ borderBottom: '1px solid #f1f5f9', background: itemRow.isAvailable ? '#ffffff' : '#fff5f5' }}>
+                            <td style={{ padding: '8px 10px' }}>
+                              <input
+                                type="text"
+                                value={itemRow.medicationName}
+                                onChange={(e) => {
+                                  const val = e.target.value;
+                                  setReplyItems((prev) => prev.map((it, i) => (i === idx ? { ...it, medicationName: val } : it)));
+                                }}
+                                placeholder="اسم الصنف..."
+                                className="outstock-form-input"
+                                style={{ minHeight: '32px', fontSize: '12px', fontWeight: 'bold' }}
+                              />
+                              <input
+                                type="text"
+                                value={itemRow.notes || ''}
+                                onChange={(e) => {
+                                  const val = e.target.value;
+                                  setReplyItems((prev) => prev.map((it, i) => (i === idx ? { ...it, notes: val } : it)));
+                                }}
+                                placeholder="ملاحظات المشتريات / البديل المقترح..."
+                                className="outstock-form-input"
+                                style={{ minHeight: '26px', fontSize: '11px', marginTop: '4px', color: '#64748b' }}
+                              />
+                            </td>
+                            <td style={{ padding: '8px 6px' }}>
+                              <div style={{ display: 'flex', flexDirection: 'column', gap: '3px' }}>
+                                <input
+                                  type="number"
+                                  min="1"
+                                  value={itemRow.quantity}
+                                  onChange={(e) => {
+                                    const val = parseInt(e.target.value, 10) || 1;
+                                    setReplyItems((prev) => prev.map((it, i) => (i === idx ? { ...it, quantity: val } : it)));
+                                  }}
+                                  className="outstock-form-input"
+                                  style={{ minHeight: '30px', fontSize: '11.5px', textAlign: 'center' }}
+                                />
+                                <span style={{ fontSize: '10.5px', color: '#64748b', textAlign: 'center' }}>{itemRow.unit || 'علبة'}</span>
+                              </div>
+                            </td>
+                            <td style={{ padding: '8px 6px', textAlign: 'center' }}>
+                              <div style={{ position: 'relative' }}>
+                                <input
+                                  type="number"
+                                  step="0.5"
+                                  min="0"
+                                  placeholder="0.00"
+                                  value={itemRow.price}
+                                  onChange={(e) => {
+                                    const val = e.target.value;
+                                    setReplyItems((prev) => prev.map((it, i) => (i === idx ? { ...it, price: val } : it)));
+                                  }}
+                                  className="outstock-form-input"
+                                  style={{ minHeight: '32px', fontSize: '12.5px', fontWeight: '800', textAlign: 'center', color: '#15803d', borderColor: '#86efac' }}
+                                />
+                                <span style={{ position: 'absolute', left: '6px', top: '7px', fontSize: '10px', color: '#64748b' }}>ج.م</span>
+                              </div>
+                            </td>
+                            <td style={{ padding: '8px 6px', textAlign: 'center' }}>
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  setReplyItems((prev) => prev.map((it, i) => (i === idx ? { ...it, isAvailable: !it.isAvailable } : it)));
+                                }}
+                                style={{
+                                  width: '100%',
+                                  minHeight: '32px',
+                                  borderRadius: '6px',
+                                  border: itemRow.isAvailable ? '1.5px solid #10b981' : '1.5px solid #ef4444',
+                                  background: itemRow.isAvailable ? '#ecfdf5' : '#fef2f2',
+                                  color: itemRow.isAvailable ? '#065f46' : '#991b1b',
+                                  fontSize: '11px',
+                                  fontWeight: '800',
+                                  cursor: 'pointer',
+                                  display: 'inline-flex',
+                                  alignItems: 'center',
+                                  justifyContent: 'center',
+                                  gap: '3px',
+                                  transition: 'all 0.15s ease'
+                                }}
+                                title="انقر لتبديل حالة التوفير"
+                              >
+                                {itemRow.isAvailable ? (
+                                  <>
+                                    <CheckCircle2 size={13} color="#10b981" />
+                                    <span>متاح للتوفير 🟢</span>
+                                  </>
+                                ) : (
+                                  <>
+                                    <AlertCircle size={13} color="#ef4444" />
+                                    <span>غير متاح 🔴</span>
+                                  </>
+                                )}
+                              </button>
+                            </td>
+                            <td style={{ padding: '8px 6px', textAlign: 'center' }}>
+                              {replyItems.length > 1 && (
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    setReplyItems((prev) => prev.filter((_, i) => i !== idx));
+                                  }}
+                                  style={{
+                                    background: 'transparent',
+                                    border: 'none',
+                                    color: '#ef4444',
+                                    cursor: 'pointer',
+                                    padding: '4px'
+                                  }}
+                                  title="حذف هذا الصنف"
+                                >
+                                  <Trash2 size={15} />
+                                </button>
+                              )}
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+
+                <div>
+                  <label style={{ fontSize: '12.5px', fontWeight: '800', color: '#334155', display: 'block', marginBottom: '6px' }}>
+                    نص تعليق رد المشتريات العام وتوجيهات الفرع:
+                  </label>
+                  <textarea
+                    rows={3}
+                    placeholder="مثال: الصنف متوفر لدى شركة ابن سينا بخصم 20%، السعر الرسمي الجديد 45 ج.م وتم تحديثه..."
+                    value={replyNotes}
+                    onChange={(e) => setReplyNotes(e.target.value)}
+                    className="outstock-form-input"
+                    style={{ resize: 'vertical' }}
+                  />
+                </div>
+
+                <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '10px', marginTop: '10px' }}>
+                  <button
+                    type="button"
+                    onClick={() => setReplyTargetRequest(null)}
+                    disabled={isReplying}
+                    className="outstock-btn outstock-btn-secondary"
+                  >
+                    إلغاء
+                  </button>
+                  <button
+                    type="button"
+                    onClick={handleSendReply}
+                    disabled={isReplying}
+                    className="outstock-btn outstock-btn-primary"
+                  >
+                    {isReplying ? 'جاري الحفظ...' : 'حفظ وإرسال الرد للفرع'}
+                  </button>
+                </div>
+              </div>
+            </div>
+          )}
         </div>
       )}
 

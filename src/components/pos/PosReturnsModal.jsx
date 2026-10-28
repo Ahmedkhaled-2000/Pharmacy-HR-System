@@ -2,6 +2,7 @@ import React, { useState, useMemo, useEffect } from 'react';
 import { usePOS } from '../../context/POSContext';
 import { useAuth } from '../../context/AuthContext';
 import { useData } from '../../context/DataContext';
+import { useUI } from '../../context/UIContext';
 import { logPosSecurityAction } from '../../utils/posAuditLogger';
 import {
   RotateCcw,
@@ -17,9 +18,10 @@ import {
 } from 'lucide-react';
 
 export default function PosReturnsModal() {
-  const { isReturnsModalOpen, setIsReturnsModalOpen, currentShift } = usePOS();
+  const { isReturnsModalOpen, setIsReturnsModalOpen, currentShift, setCurrentShift } = usePOS();
   const { currentBranch, currentEmpUser } = useAuth?.() || {};
   const { state } = useData?.() || {};
+  const { showToast } = useUI?.() || {};
 
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedInvoice, setSelectedInvoice] = useState(null);
@@ -72,7 +74,8 @@ export default function PosReturnsModal() {
     setSelectedInvoice(inv);
     const initialReturns = {};
     (inv.items || []).forEach((item, idx) => {
-      initialReturns[idx] = { returnQty: 0, maxQty: item.quantity, unitPrice: item.unitPrice, item };
+      const remainingReturnable = Math.max(0, (item.quantity || 0) - (item.returnedQty || 0));
+      initialReturns[idx] = { returnQty: 0, maxQty: remainingReturnable, unitPrice: item.unitPrice, item };
     });
     setReturnItemsState(initialReturns);
   };
@@ -94,7 +97,7 @@ export default function PosReturnsModal() {
 
   const handleConfirmReturn = () => {
     if (totalRefundAmount <= 0) {
-      alert('⚠️ يرجى تحديد كمية صنف واحد على الأقل للمرتجع.');
+      showToast?.('⚠️ يرجى تحديد كمية صنف واحد على الأقل للمرتجع.');
       return;
     }
 
@@ -142,6 +145,71 @@ export default function PosReturnsModal() {
       console.error('Failed saving return record:', err);
     }
 
+    // تحديث كاش الوردية بخصم المرتجع الفعلي من الدرج
+    if (setCurrentShift) {
+      setCurrentShift((prev) => ({
+        ...prev,
+        cashRefunds: parseFloat(((prev?.cashRefunds || 0) + totalRefundAmount).toFixed(2))
+      }));
+    }
+
+    // تحديث الفاتورة الأصلية في السجل لمنع تكرار الإرجاع
+    try {
+      const salesRaw = localStorage.getItem('pharma_pos_sales');
+      if (salesRaw) {
+        let salesList = JSON.parse(salesRaw);
+        const sIdx = salesList.findIndex(s => s.id === selectedInvoice.id || s.invoiceNumber === selectedInvoice.invoiceNumber);
+        if (sIdx >= 0) {
+          const targetSale = salesList[sIdx];
+          const updatedItems = (targetSale.items || []).map((it, idx) => {
+            const retState = returnItemsState[idx];
+            if (retState && retState.returnQty > 0) {
+              return {
+                ...it,
+                returnedQty: (it.returnedQty || 0) + retState.returnQty
+              };
+            }
+            return it;
+          });
+          salesList[sIdx] = {
+            ...targetSale,
+            items: updatedItems,
+            hasReturns: true,
+            totalRefunded: parseFloat(((targetSale.totalRefunded || 0) + totalRefundAmount).toFixed(2))
+          };
+          localStorage.setItem('pharma_pos_sales', JSON.stringify(salesList));
+        }
+      }
+    } catch (e) {
+      console.warn('Failed to update sales invoice with return status:', e);
+    }
+
+    // إدراج المرتجع في طابور الـ Outbox الموحد للمزامنة مع السيرفر السحابي
+    try {
+      const outboxRaw = localStorage.getItem('pharma_pos_outbox');
+      const outbox = outboxRaw ? JSON.parse(outboxRaw) : [];
+      outbox.push({
+        eventId: `evt_ret_${Date.now()}_${Math.random().toString(36).substring(2, 8)}`,
+        eventType: 'sale.return',
+        idempotencyKey: `pos_ret_${selectedInvoice.invoiceNumber}_${Date.now()}`,
+        payload: returnRecord,
+        retryCount: 0,
+        createdAt: new Date().toISOString(),
+        status: 'pending'
+      });
+      localStorage.setItem('pharma_pos_outbox', JSON.stringify(outbox));
+      window.dispatchEvent(new CustomEvent('pos:outbox-updated', { detail: { count: outbox.length } }));
+
+      // محاولة المزامنة اللحظية لو الإنترنت متاح
+      if (typeof navigator !== 'undefined' && navigator.onLine) {
+        import('../../utils/posOfflineSync.js').then((mod) => {
+          mod.triggerBackgroundSync?.();
+        }).catch(() => {});
+      }
+    } catch (e) {
+      console.warn('Failed to enqueue return to outbox:', e);
+    }
+
     // تسجيل في سجل الرقابة والأمان (Anti-skimming security audit)
     logPosSecurityAction({
       actionType: 'VERIFIED_REFUND',
@@ -160,7 +228,7 @@ export default function PosReturnsModal() {
 
     window.dispatchEvent(new CustomEvent('pos:return-completed', { detail: returnRecord }));
 
-    alert(`✅ تم اعتماد مرتجع المبيعات بنجاح بمبلغ: ${totalRefundAmount.toFixed(2)} جنيه.\nتم التوثيق باسم الموظف: ${activeName} (${activeCode}).`);
+    showToast?.(`✅ تم اعتماد مرتجع المبيعات وخصم ${totalRefundAmount.toFixed(2)} ج من عهدة الدرج بنجاح.`);
     setIsReturnsModalOpen(false);
   };
 

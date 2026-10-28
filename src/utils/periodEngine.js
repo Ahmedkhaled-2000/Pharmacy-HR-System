@@ -507,7 +507,15 @@ export function validateDatesInActiveCycle(datesInput, orgSettings = {}, refDate
  */
 export function isBranchTerminatedInCycle(branchDetail) {
   if (!branchDetail || typeof branchDetail !== 'object') return false;
-  return branchDetail.status === 'cycle_terminated' || Boolean(branchDetail.isTerminatedInCycle);
+  return (
+    branchDetail.status === 'cycle_terminated' ||
+    Boolean(branchDetail.isTerminatedInCycle) ||
+    Boolean(branchDetail.isResigned) ||
+    Boolean(branchDetail.resigned) ||
+    branchDetail.status === 'resigned' ||
+    branchDetail.status === 'terminated' ||
+    Boolean(branchDetail.isTerminated)
+  );
 }
 
 /**
@@ -620,6 +628,7 @@ export function reconcileCycleTerminatedBranches(employees = [], orgSettings = {
       salary: newPrimarySalary,
       branchesDetails: remainingBranches,
       archivedBranchesDetails: newArchived,
+      isMultiBranch: activeBranches.length > 1,
       updatedAt: new Date().toISOString()
     };
   });

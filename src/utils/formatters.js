@@ -1447,11 +1447,26 @@ export function getEmployeeApprovedLeaves(emp, state, periodFilterFn = null) {
       }
     }
 
-    const cleanLeaveType = (r.leaveType === 'unpaid' || r.type === 'unpaid_leave' || r.isUnpaid)
-      ? 'unpaid'
-      : (r.leaveType === 'sick' || r.type === 'sick_leave')
-      ? 'sick'
-      : 'annual';
+    let cleanLeaveType = r.leaveType || r.type || 'annual';
+    if (r.leaveType === 'unpaid' || r.type === 'unpaid_leave' || r.isUnpaid) {
+      cleanLeaveType = 'unpaid';
+    } else if (r.leaveType === 'sick' || r.type === 'sick_leave') {
+      cleanLeaveType = 'sick';
+    } else if (r.leaveType === 'comp_off' || r.type === 'comp_off' || r.type === 'leave_comp_off') {
+      cleanLeaveType = 'comp_off';
+    } else if (r.leaveType === 'casual' || r.type === 'casual_leave') {
+      cleanLeaveType = 'casual';
+    } else if (r.leaveType === 'marriage') {
+      cleanLeaveType = 'marriage';
+    } else if (r.leaveType === 'maternity') {
+      cleanLeaveType = 'maternity';
+    } else if (r.leaveType === 'bereavement') {
+      cleanLeaveType = 'bereavement';
+    } else if (r.leaveType === 'official' || r.type === 'official_holiday') {
+      cleanLeaveType = 'official';
+    } else if (cleanLeaveType === 'leave' || cleanLeaveType === 'leave_request' || cleanLeaveType === 'annual_leave') {
+      cleanLeaveType = 'annual';
+    }
 
     // Deduplication signature key by employee + start date + end date + leave type
     const sigKey = `${empIdStr || empCodeStr}_${sDate}_${eDate}_${cleanLeaveType}`;
@@ -1538,7 +1553,8 @@ export function calculateEmployeeLeaveStats(emp, state, targetYear = '') {
   const allLeaves = getEmployeeApprovedLeaves(emp, state);
 
   const approvedAnnualLeaves = allLeaves.filter((r) => {
-    const isAnnual = !r.leaveType || r.leaveType === 'annual' || r.type === 'annual_leave' || r.type === 'leave';
+    const lType = r.leaveType || r.type || 'annual';
+    const isAnnual = lType === 'annual' || lType === 'casual' || r.type === 'annual_leave' || r.type === 'casual_leave' || (r.type === 'leave' && (!r.leaveType || r.leaveType === 'annual' || r.leaveType === 'casual'));
     const isAppr = r.status === 'approved' || r.adminApproved;
     const start = String(r.startDate || r.date || '');
     const inYear = !year || start.startsWith(year);

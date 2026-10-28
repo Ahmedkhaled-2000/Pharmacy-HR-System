@@ -5,7 +5,8 @@ import { normalizeSchedule, getEmployeeDaySchedule, projectRosterToMonth } from 
 import { notifyEmployeeEarlyExitWarning, notifyOnPenaltyApplied } from '../../utils/gmailService';
 import { recalculateEmployeeCycleLateness, applyApprovedPermissionsToShifts, isApprovedPermissionForDate, reconcileEmployeeScheduleOrPunchChange } from '../../utils/latePenaltyEngine';
 import { shouldRouteDirectToAdmin, isBranchWithoutManager, isDualApprovalRequest, isEmployeeBranchManager, isUpperManagementEmp } from '../../utils/jobsHelper';
-import { syncNow, fetchRemoteState, hardDeleteEntityFast, purgeAllRequestsCloudAndLocal } from '../../utils/offlineSync';
+import { syncNow, fetchRemoteState, hardDeleteEntityFast, purgeAllRequestsCloudAndLocal, saveStateLocally } from '../../utils/offlineSync';
+import { apiSubmitRequestDecision, apiSaveSettingsSlice } from '../../utils/apiClient';
 import { putRequestsBatch } from '../../utils/localDatabase';
 import { createRequestDecisionNotification } from '../../utils/notificationEngine';
 import { useUI } from '../../context/UIContext';
@@ -1177,7 +1178,8 @@ export default function RequestsModule({
         ...targetReq,
         status: 'approved',
         adminApproved: true,
-        approvedAt: new Date().toISOString()
+        approvedAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString()
       };
       if (approvedTargetReq.photoUrl) delete approvedTargetReq.photoUrl;
 
@@ -2907,10 +2909,51 @@ export default function RequestsModule({
         notifications: updatedNotifications
       };
       if (setState) setState(updatedState);
-      showToast?.('✅ تم اعتماد موافقة الطلب وتطبيق التأثير فوراً على الأجور والجداول');
-      if (saveState) {
-        saveState(updatedState).catch(err => console.error('Background save error:', err));
+
+      // 1. إرسال فوري ومباشر لنقطة نهاية السيرفر الذرية /api/requests/decide (< 30ms)
+      try {
+        await apiSubmitRequestDecision({
+          requestId: reqId,
+          decision: 'approve',
+          newStatus: 'approved',
+          role: effectiveRole,
+          approvedAt: approvedTargetReq.approvedAt || new Date().toISOString(),
+          adminNotes: approvedTargetReq.adminNotes || '',
+          request: approvedTargetReq
+        }, { keepalive: true });
+      } catch (err) {
+        console.warn('apiSubmitRequestDecision error in RequestsModule:', err);
       }
+
+      // 2. حفظ ذري سريع للشرائح الأساسية (Slices) دفعة واحدة
+      const slicesToSave = { requests: updatedRequests };
+      if (updatedShifts !== state.shifts) slicesToSave.shifts = updatedShifts;
+      if (updatedRosters !== state.rosters) slicesToSave.rosters = updatedRosters;
+      if (updatedAdjustments !== state.adjustments) slicesToSave.adjustments = updatedAdjustments;
+      if (updatedEmployees !== state.employees) slicesToSave.employees = updatedEmployees;
+      if (updatedLoans !== state.loans) slicesToSave.loans = updatedLoans;
+      if (updatedLeaveRequests !== state.leaveRequests) slicesToSave.leaveRequests = updatedLeaveRequests;
+      if (updatedPermRequests !== state.permissionRequests) slicesToSave.permissionRequests = updatedPermRequests;
+      if (updatedLateIncidents !== state.lateIncidents) slicesToSave.lateIncidents = updatedLateIncidents;
+      try {
+        await apiSaveSettingsSlice(slicesToSave, null, { keepalive: true });
+      } catch (err) {
+        console.warn('apiSaveSettingsSlice error in RequestsModule:', err);
+      }
+
+      // 3. تثبيت محلي فوري في IndexedDB
+      try {
+        await saveStateLocally(updatedState);
+      } catch (err) {
+        console.warn('saveStateLocally error in RequestsModule:', err);
+      }
+
+      // 4. حفظ الحالة وتمرير تلميح الشريحة
+      if (saveState) {
+        await saveState(updatedState, { entityType: 'request', entityId: reqId }).catch(err => console.error('Background save error:', err));
+      }
+
+      showToast?.('✅ تم اعتماد موافقة الطلب وتطبيق التأثير فوراً على الأجور والجداول');
       enqueueRequestDecision({
         requestId: reqId,
         decision: 'approve',
@@ -3476,7 +3519,44 @@ export default function RequestsModule({
     };
 
       if (setState) setState(updatedState);
-      if (saveState) await saveState(updatedState);
+
+      // 1. إرسال فوري ومباشر لنقطة نهاية السيرفر الذرية /api/requests/decide (< 30ms)
+      try {
+        await apiSubmitRequestDecision({
+          requestId: rejectedTargetReq?.id || reqId,
+          decision: 'reject',
+          newStatus: 'rejected',
+          role: effectiveRole,
+          rejectedAt: new Date().toISOString(),
+          request: rejectedTargetReq || targetReq
+        }, { keepalive: true });
+      } catch (err) {
+        console.warn('apiSubmitRequestDecision reject error in RequestsModule:', err);
+      }
+
+      // 2. حفظ ذري سريع للشرائح الأساسية (Slices)
+      const slicesToSave = { requests: updatedRequests };
+      if (updatedShifts !== state.shifts) slicesToSave.shifts = updatedShifts;
+      if (updatedLoans !== state.loans) slicesToSave.loans = updatedLoans;
+      if (updatedLeaveRequests !== state.leaveRequests) slicesToSave.leaveRequests = updatedLeaveRequests;
+      if (updatedPermRequests !== state.permissionRequests) slicesToSave.permissionRequests = updatedPermRequests;
+      try {
+        await apiSaveSettingsSlice(slicesToSave, null, { keepalive: true });
+      } catch (err) {
+        console.warn('apiSaveSettingsSlice reject error in RequestsModule:', err);
+      }
+
+      // 3. تثبيت محلي فوري في IndexedDB
+      try {
+        await saveStateLocally(updatedState);
+      } catch (err) {
+        console.warn('saveStateLocally reject error in RequestsModule:', err);
+      }
+
+      // 4. حفظ الحالة وتمرير تلميح الشريحة
+      if (saveState) {
+        await saveState(updatedState, { entityType: 'request', entityId: reqId }).catch(err => console.error('Background save error:', err));
+      }
       enqueueRequestDecision({
         requestId: reqId,
         decision: 'reject',
@@ -3656,7 +3736,26 @@ export default function RequestsModule({
 
       const updatedState = { ...state, requests: updatedRequests, adjustments: updatedAdjustments };
       if (setState) setState(updatedState);
-      if (saveState) await saveState(updatedState);
+
+      try {
+        await apiSubmitRequestDecision({
+          requestId: reqId,
+          decision: 'approve',
+          newStatus: 'cancelled',
+          role: 'admin',
+          approvedAt: new Date().toISOString()
+        }, { keepalive: true });
+      } catch (err) {}
+
+      try {
+        await apiSaveSettingsSlice({ requests: updatedRequests, adjustments: updatedAdjustments }, null, { keepalive: true });
+      } catch (err) {}
+
+      try {
+        await saveStateLocally(updatedState);
+      } catch (err) {}
+
+      if (saveState) await saveState(updatedState, { entityType: 'request', entityId: reqId }).catch(() => {});
 
       const approvedObjectionReq = (requests || []).find(r => r.id === reqId);
       if (approvedObjectionReq) {
@@ -3705,7 +3804,16 @@ export default function RequestsModule({
 
       const updatedState = { ...state, requests: updatedRequests };
       if (setState) setState(updatedState);
-      if (saveState) await saveState(updatedState);
+
+      try {
+        await apiSaveSettingsSlice({ requests: updatedRequests }, null, { keepalive: true });
+      } catch (err) {}
+
+      try {
+        await saveStateLocally(updatedState);
+      } catch (err) {}
+
+      if (saveState) await saveState(updatedState, { entityType: 'request', entityId: reqId }).catch(() => {});
 
       const rejectedObjectionReq = (requests || []).find(r => r.id === reqId);
       if (rejectedObjectionReq) {

@@ -339,13 +339,46 @@ export default function EmployeePortalView({
     return getCycleDateRange(selectedMonth, orgSettings || state?.orgSettings);
   }, [selectedMonth, orgSettings, state?.orgSettings]);
 
+  // 🛡️ استخراج كافة الفروع المؤرشفة أو المستقيل منها الموظف لمنع ظهورها نهائياً
+  const archivedBranchIds = useMemo(() => {
+    const set = new Set();
+    if (Array.isArray(emp?.archivedBranchesDetails)) {
+      emp.archivedBranchesDetails.forEach((ab) => {
+        if (ab?.branchId) set.add(String(ab.branchId));
+        if (ab?.id) set.add(String(ab.id));
+      });
+    }
+    if (Array.isArray(emp?.resignedBranches)) {
+      emp.resignedBranches.forEach((bId) => {
+        if (bId) set.add(String(bId));
+      });
+    }
+    return set;
+  }, [emp?.archivedBranchesDetails, emp?.resignedBranches]);
+
   const employeeActiveBranches = useMemo(() => {
     let list = [];
     if (Array.isArray(emp?.branchesDetails) && emp.branchesDetails.length > 0) {
-      // 🛡️ الاحتفاظ بكافة فروع الموظف المسجلة في دورة الرواتب حتى المنتهية خلال الدورة
-      // لتمكينه من استعراض ومراجعة سجلات وساعات ونسب الورديات الخاصة بها
-      list = [...emp.branchesDetails];
-    } else if (emp?.branchId) {
+      // 🛡️ تصفية الفروع: استبعاد أي فرع تم الاستقالة منه أو مؤرشف نهائياً
+      // أو انتهت خدمته في دورة سابقة عن الدورة المعروضة
+      list = emp.branchesDetails.filter((bd) => {
+        if (!bd || !bd.branchId) return false;
+        const bIdStr = String(bd.branchId);
+        // إذا كان الفرع موجوداً في أرشيف الفروع المستقيل منها
+        if (archivedBranchIds.has(bIdStr)) return false;
+        // إذا كان يحمل علامة استقالة أو إنهاء صريحة
+        if (bd.isResigned || bd.resigned || bd.status === 'resigned' || bd.status === 'terminated' || bd.isTerminated) return false;
+        // إذا كان منتهي الخدمة، يُعرض فقط إذا كان شهر الدورة المعروضة هو دورة الإنهاء للمراجعة
+        if (isBranchTerminatedInCycle(bd)) {
+          if (bd.terminatedCycleMonth && selectedMonth && selectedMonth > bd.terminatedCycleMonth) {
+            return false;
+          }
+        }
+        return true;
+      });
+    }
+
+    if (list.length === 0 && emp?.branchId && !archivedBranchIds.has(String(emp.branchId))) {
       list = [{
         branchId: emp.branchId,
         salary: emp.salary || 0,
@@ -359,19 +392,33 @@ export default function EmployeePortalView({
     const eId = String(emp?.id || '');
     const eCode = String(emp?.code || '');
 
-    (state?.shifts || []).forEach((s) => {
-      if (!s || !s.branchId || !s.date) return;
-      if (s.status === 'cancelled' || s.isCancelled) return;
-      const sEmpId = String(s.employeeId || '');
-      const sEmpCode = String(s.employeeCode || '');
-      const isMatch = (eId && (sEmpId === eId || sEmpCode === eId)) || (eCode && (sEmpId === eCode || sEmpCode === eCode));
-      if (!isMatch) return;
+    // إضافة الفروع الإضافية للورديات المتنقلة للموظفين المصرح لهم بالتنقل/تعدد الفروع فقط
+    // وخلال نطاق الدورة المحددة فقط، مع استبعاد تام لأي فرع مستقيل منه الموظف
+    const canRoam = Boolean(emp?.isMultiBranch || emp?.isFloatingStaff);
+    if (canRoam && empCycleRange?.startDate && empCycleRange?.endDate) {
+      (state?.shifts || []).forEach((s) => {
+        if (!s || !s.branchId || !s.date) return;
+        if (s.status === 'cancelled' || s.isCancelled) return;
+        if (s.date < empCycleRange.startDate || s.date > empCycleRange.endDate) return;
 
-      const alreadyHas = list.some((b) => isBranchMatch(b.branchId, { id: s.branchId, name: s.branchName }) || cleanBranchKey(b.branchId) === cleanBranchKey(s.branchId));
-      if (!alreadyHas) {
+        const sEmpId = String(s.employeeId || '');
+        const sEmpCode = String(s.employeeCode || '');
+        const isMatch = (eId && (sEmpId === eId || sEmpCode === eId)) || (eCode && (sEmpId === eCode || sEmpCode === eCode));
+        if (!isMatch) return;
+
         const bObj = (state?.branches || []).find((br) => isBranchMatch(s.branchId, br));
         const canonicalBId = bObj ? bObj.id : s.branchId;
-        if (!list.some((b) => String(b.branchId) === String(canonicalBId))) {
+
+        // حظر حاسم: لا يتم إضافة أي فرع تم الاستقالة منه إطلاقاً
+        if (archivedBranchIds.has(String(canonicalBId)) || archivedBranchIds.has(String(s.branchId))) return;
+
+        const alreadyHas = list.some((b) =>
+          isBranchMatch(b.branchId, { id: canonicalBId, name: s.branchName }) ||
+          cleanBranchKey(b.branchId) === cleanBranchKey(canonicalBId) ||
+          String(b.branchId) === String(canonicalBId)
+        );
+
+        if (!alreadyHas) {
           list.push({
             branchId: canonicalBId,
             salary: defaultDetail.salary || emp?.salary || 0,
@@ -381,19 +428,44 @@ export default function EmployeePortalView({
             isRoaming: true
           });
         }
-      }
-    });
+      });
+    }
 
     return list;
-  }, [emp?.branchesDetails, emp?.branchId, emp?.id, emp?.code, emp?.salary, emp?.workHoursPerDay, emp?.workHours, emp?.workDaysPerMonth, emp?.workDays, emp?.breakHours, emp?.defaultBreakHours, state?.shifts, state?.branches]);
+  }, [
+    emp?.branchesDetails,
+    emp?.branchId,
+    emp?.id,
+    emp?.code,
+    emp?.salary,
+    emp?.workHoursPerDay,
+    emp?.workHours,
+    emp?.workDaysPerMonth,
+    emp?.workDays,
+    emp?.breakHours,
+    emp?.defaultBreakHours,
+    emp?.isMultiBranch,
+    emp?.isFloatingStaff,
+    archivedBranchIds,
+    selectedMonth,
+    empCycleRange,
+    state?.shifts,
+    state?.branches
+  ]);
 
   const activeWorkingBranches = useMemo(() => {
-    const nonTerminated = (employeeActiveBranches || []).filter((b) => !isBranchTerminatedInCycle(b));
+    const nonTerminated = (employeeActiveBranches || []).filter((b) =>
+      !isBranchTerminatedInCycle(b) && !archivedBranchIds.has(String(b.branchId))
+    );
     return nonTerminated.length > 0 ? nonTerminated : employeeActiveBranches;
-  }, [employeeActiveBranches]);
+  }, [employeeActiveBranches, archivedBranchIds]);
 
   const primaryEmpBranchId = activeWorkingBranches[0]?.branchId || employeeActiveBranches[0]?.branchId || emp?.branchId || '';
-  const isInitialMulti = (employeeActiveBranches || []).length > 1;
+  
+  // 🛡️ الموظف يُعتبر متعدد الفروع فقط إذا كان فعلياً يمتلك أكثر من فرع نشط على رأس العمل
+  // وإذا لم يكن كذلك، لا يجب إدخاله في وضع "الكل" أو إخفاء النماذج عنه
+  const isMultiBranchEmp = (Boolean(emp?.isMultiBranch) || Boolean(emp?.isFloatingStaff) || activeWorkingBranches.length > 1) && activeWorkingBranches.length > 1;
+  const isInitialMulti = isMultiBranchEmp;
   const [selectedBranchId, setSelectedBranchId] = useState(isInitialMulti ? '' : primaryEmpBranchId);
   const [isBranchSelected, setIsBranchSelected] = useState(true);
   const [punchTargetBranchId, setPunchTargetBranchId] = useState(primaryEmpBranchId);
@@ -410,24 +482,24 @@ export default function EmployeePortalView({
   }, [employeeActiveBranches, selectedBranchId, state?.branches]);
 
   const isSelectedBranchTerminated = useMemo(() => {
-    return isBranchTerminatedInCycle(selectedBranchDetails);
-  }, [selectedBranchDetails]);
+    return isBranchTerminatedInCycle(selectedBranchDetails) || archivedBranchIds.has(String(selectedBranchId));
+  }, [selectedBranchDetails, archivedBranchIds, selectedBranchId]);
 
   useEffect(() => {
     if (currentEmpUser) {
       const currentEmp = (state && state.employees && state.employees.find((e) => e.id === currentEmpUser?.id)) || currentEmpUser;
       const primaryBId = activeWorkingBranches[0]?.branchId || employeeActiveBranches[0]?.branchId || currentEmp?.branchId || '';
 
-      if (employeeActiveBranches.length <= 1) {
+      if (!isMultiBranchEmp || activeWorkingBranches.length <= 1) {
         setSelectedBranchId(primaryBId);
         setIsBranchSelected(true);
         setPunchTargetBranchId(primaryBId);
       } else {
         setPunchTargetBranchId(primaryBId);
-        // Multi-branch employees: keep current selectedBranchId if valid, otherwise keep '' (all branches)
+        // Multi-branch employees: keep current selectedBranchId if valid and active, otherwise fallback to '' or primaryBId
         setSelectedBranchId((prev) => {
           if (!prev || prev === '') return '';
-          const stillExists = employeeActiveBranches.some((b) =>
+          const stillExists = activeWorkingBranches.some((b) =>
             String(b.branchId) === String(prev) ||
             cleanBranchKey(b.branchId) === cleanBranchKey(prev) ||
             isBranchMatch(b.branchId, { id: prev })
@@ -436,9 +508,8 @@ export default function EmployeePortalView({
         });
       }
     }
-  }, [currentEmpUser?.id, employeeActiveBranches, activeWorkingBranches]);
+  }, [currentEmpUser?.id, isMultiBranchEmp, employeeActiveBranches, activeWorkingBranches]);
 
-  const isMultiBranchEmp = employeeActiveBranches.length > 1;
   const isAllBranchesMode = isMultiBranchEmp && (!selectedBranchId || selectedBranchId === '');
   const [shiftBranchFilter, setShiftBranchFilter] = useState('all');
 
@@ -4770,7 +4841,7 @@ export default function EmployeePortalView({
               <div style={{ display: 'flex', gap: '8px', alignItems: 'center', flexWrap: 'wrap' }}>
                 <span style={{ fontSize: '12px', color: '#0f766e', fontWeight: 700 }}>الانتقال لفرع لتقديم طلب:</span>
                 {employeeActiveBranches
-                  .filter((bd) => !isBranchTerminatedInCycle(bd))
+                  .filter((bd) => !isBranchTerminatedInCycle(bd) && !archivedBranchIds.has(String(bd.branchId)))
                   .map((bd) => {
                   const br = state.branches?.find(b => isBranchMatch(bd.branchId, b) || String(b.id) === String(bd.branchId));
                   return (
@@ -4968,7 +5039,7 @@ export default function EmployeePortalView({
                                     style={{ padding: '6px 10px', borderRadius: '8px', border: '1px solid var(--border)', fontSize: '12.5px', fontWeight: 'bold' }}
                                   >
                                     {employeeActiveBranches
-                                      .filter((bd) => !isBranchTerminatedInCycle(bd))
+                                      .filter((bd) => !isBranchTerminatedInCycle(bd) && !archivedBranchIds.has(String(bd.branchId)))
                                       .map((bd) => {
                                         const b = (state.branches || []).find((br) => isBranchMatch(br.id, { id: bd.branchId }));
                                         return <option key={bd.branchId} value={bd.branchId}>فرع {b?.name || bd.branchId}</option>;
@@ -5530,7 +5601,7 @@ export default function EmployeePortalView({
                           onChange={(e) => setEmpManualBranchId(e.target.value)}
                         >
                           {employeeActiveBranches
-                            .filter((bd) => !isBranchTerminatedInCycle(bd))
+                            .filter((bd) => !isBranchTerminatedInCycle(bd) && !archivedBranchIds.has(String(bd.branchId)))
                             .map((bd) => {
                             const b = (state.branches || []).find((br) => isBranchMatch(br.id, { id: bd.branchId }));
                             return (

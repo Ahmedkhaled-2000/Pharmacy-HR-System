@@ -82,6 +82,7 @@ export default function RosterPreviewModal({
   const [editEnd, setEditEnd] = useState('16:00');
   const [editHours, setEditHours] = useState(8);
   const [editNote, setEditNote] = useState('');
+  const [savingDayEdit, setSavingDayEdit] = useState(false);
 
   useEffect(() => {
     const handleKeyDown = (e) => {
@@ -202,132 +203,259 @@ export default function RosterPreviewModal({
 
   const isMultiBranch = employee.branchesDetails && employee.branchesDetails.length > 1;
 
+  // ── حساب دقيق وصارم لفرق الساعات بين موعدي الحضور والانصراف ──
+  const calculateHoursBetween = (start, end) => {
+    if (!start || !end) return 0;
+    const [sH, sM] = String(start).slice(0, 5).split(':').map(Number);
+    const [eH, eM] = String(end).slice(0, 5).split(':').map(Number);
+    if (isNaN(sH) || isNaN(eH)) return 0;
+    const sMins = sH * 60 + (sM || 0);
+    const eMins = eH * 60 + (eM || 0);
+    if (sMins === eMins) return 0;
+    let diff = eMins - sMins;
+    if (diff < 0) diff += 24 * 60;
+    return Math.round((diff / 60) * 10) / 10;
+  };
+
   // ── فتح نافذة تعديل شفت يوم معين ──
   const handleOpenEditDay = (dateStr, dayName, currentShift) => {
     const isOff = currentShift?.type === 'off' || currentShift?.isOff === true;
+    const s = currentShift?.start || '08:00';
+    const e = currentShift?.end || '16:00';
+    const computedH = (!isOff && s && e) ? calculateHoursBetween(s, e) : (isOff ? 0 : (employee.workHoursPerDay || 8));
+
+    setSavingDayEdit(false);
     setEditType(isOff ? 'off' : 'shift');
-    setEditStart(currentShift?.start || '08:00');
-    setEditEnd(currentShift?.end || '16:00');
-    setEditHours(currentShift?.hours !== undefined ? currentShift.hours : (isOff ? 0 : (employee.workHoursPerDay || 8)));
+    setEditStart(s);
+    setEditEnd(e);
+    setEditHours(computedH);
     setEditNote(currentShift?.note || '');
     setEditingDay({ dateStr, dayName, currentShift });
   };
 
-  // ── حفظ وتثبيت تعديل شفت يوم معين في الروستر المعتمد ──
-  // ── حفظ وتثبيت تعديل شفت يوم معين في الروستر المعتمد مع إعادة احتساب ساعات العمل والبصمات ──
+  // ── حفظ وتثبيت تعديل شفت يوم معين في الروستر المعتمد مع استجابة لحظية فائقة (< 10ms) ──
   const handleSaveDayEdit = async () => {
-    if (!editingDay) return;
-    const isOff = editType === 'off';
-    const shiftPayload = {
-      type: isOff ? 'off' : 'shift',
-      isOff,
-      start: isOff ? '' : editStart,
-      end: isOff ? '' : editEnd,
-      hours: isOff ? 0 : (parseFloat(editHours) || (employee.workHoursPerDay || 8)),
-      editedByAdmin: true,
-      note: editNote || 'تعديل شفت مباشر من الإدارة',
-      updatedAt: new Date().toISOString()
-    };
+    if (!editingDay || savingDayEdit) return;
+    setSavingDayEdit(true);
+    const targetDay = editingDay;
+    try {
+      const isOff = editType === 'off';
+      const computedDuration = (!isOff && editStart && editEnd) ? calculateHoursBetween(editStart, editEnd) : 0;
+      const hoursVal = isOff ? 0 : (parseFloat(editHours) || computedDuration || (employee.workHoursPerDay || 8));
 
-    const existingRosters = state?.rosters || [];
-    const targetMonthKey = activeMonth || cycleRange.month || editingDay.dateStr.slice(0, 7);
+      const shiftPayload = {
+        type: isOff ? 'off' : 'shift',
+        isOff,
+        start: isOff ? '' : editStart,
+        end: isOff ? '' : editEnd,
+        hours: hoursVal,
+        editedByAdmin: true,
+        branchId: employee.branchId || employee.primaryBranchId || null,
+        branchName: employee.branchName || '',
+        note: editNote || 'تعديل شفت مباشر من الإدارة',
+        shifts: isOff ? [] : [{
+          id: `shift_${targetDay.dateStr}_1`,
+          shiftIndex: 1,
+          start: editStart,
+          end: editEnd,
+          hours: hoursVal,
+          branchId: employee.branchId || employee.primaryBranchId || null,
+          branchName: employee.branchName || ''
+        }],
+        hasSecondShift: false,
+        secondShift: null,
+        otherBranchShifts: [],
+        otherBranchSecondShift: null,
+        isMultiShiftDay: false,
+        updatedAt: new Date().toISOString()
+      };
 
-    // تصفية أي جداول متضاربة لهذا الموظف ونفس الشهر
-    const matchingRoster = existingRosters.find(r =>
-      (String(r.employeeId) === String(employee.id) || (employee.code && String(r.employeeCode) === String(employee.code))) &&
-      (!r.month || r.month === targetMonthKey)
-    );
-    const otherRosters = existingRosters.filter(r =>
-      !(
+      const existingRosters = state?.rosters || [];
+      const targetMonthKey = activeMonth || cycleRange.month || targetDay.dateStr.slice(0, 7);
+
+      // تصفية أي جداول متضاربة لهذا الموظف ونفس الشهر
+      const matchingRoster = existingRosters.find(r =>
         (String(r.employeeId) === String(employee.id) || (employee.code && String(r.employeeCode) === String(employee.code))) &&
         (!r.month || r.month === targetMonthKey)
-      )
-    );
+      );
+      const otherRosters = existingRosters.filter(r =>
+        !(
+          (String(r.employeeId) === String(employee.id) || (employee.code && String(r.employeeCode) === String(employee.code))) &&
+          (!r.month || r.month === targetMonthKey)
+        )
+      );
 
-    const baseSchedule = matchingRoster?.schedule || singleSchedule || {};
-    const updatedSchedule = {
-      ...baseSchedule,
-      [editingDay.dateStr]: shiftPayload
-    };
+      const baseSchedule = matchingRoster?.schedule || singleSchedule || {};
+      const updatedSchedule = {
+        ...baseSchedule,
+        [targetDay.dateStr]: shiftPayload
+      };
 
-    const rosterId = matchingRoster?.id || `roster_${employee.id}_${targetMonthKey}`;
-    const updatedRosterObj = {
-      ...(matchingRoster || {}),
-      id: rosterId,
-      employeeId: employee.id,
-      employeeCode: employee.code || '',
-      employeeName: employee.name || '',
-      month: targetMonthKey,
-      status: 'approved',
-      adminApproved: true,
-      branchId: employee.branchId || null,
-      schedule: updatedSchedule,
-      updatedAt: new Date().toISOString()
-    };
-
-    const updatedRosters = [updatedRosterObj, ...otherRosters];
-
-    const updatedEmployees = (state?.employees || []).map((emp) => {
-      if (String(emp.id) === String(employee.id) || (employee.code && String(emp.code) === String(employee.code))) {
-        return {
-          ...emp,
-          roster: { ...(emp.roster || {}), schedule: updatedSchedule }
-        };
-      }
-      return emp;
-    });
-
-    const interimState = {
-      ...state,
-      rosters: updatedRosters,
-      employees: updatedEmployees
-    };
-
-    // 🌟 إعادة احتساب ساعات العمل ومقارنة البصمات واحتساب الإضافي وإلغاء جزاءات التأخير تلقائياً
-    const { updatedState: reconciledState, summary: reconSummary } = reconcileEmployeeScheduleOrPunchChange({
-      employeeId: employee.id,
-      changedDates: [editingDay.dateStr],
-      state: interimState,
-      options: { reason: `تعديل شفت يوم ${editingDay.dayName} (${editingDay.dateStr})` }
-    });
-
-    setState?.(reconciledState);
-
-    // 🌟 حفظ ذري موحد فائق السرعة عبر نقطة الاتصال المركزية الجديدة للسيرفر (< 20ms)
-    let atomicSuccess = false;
-    try {
-      await apiSaveRosterAtomic({
+      const rosterId = matchingRoster?.id || `roster_${employee.id}_${targetMonthKey}`;
+      const nowIso = new Date().toISOString();
+      const updatedRosterObj = {
+        ...(matchingRoster || {}),
+        id: rosterId,
         employeeId: employee.id,
         employeeCode: employee.code || '',
         employeeName: employee.name || '',
         month: targetMonthKey,
+        isUnifiedMaster: true,
+        status: 'approved',
+        adminApproved: true,
         branchId: employee.branchId || null,
-        roster: updatedRosterObj,
-        rosters: reconciledState.rosters,
-        employees: reconciledState.employees,
-        shifts: reconciledState.shifts,
-        lateIncidents: reconciledState.lateIncidents,
-        requests: reconciledState.requests,
-        notifications: reconciledState.notifications
-      });
-      atomicSuccess = true;
-    } catch (atomicErr) {
-      console.warn('[RosterAtomicSave] Fallback in RosterPreviewModal:', atomicErr);
-    }
+        schedule: updatedSchedule,
+        approvedAt: nowIso,
+        updatedAt: nowIso
+      };
 
-    if (!atomicSuccess && saveState) {
-      await saveState(reconciledState, { entityType: 'rosters' });
-    } else if (atomicSuccess) {
+      const updatedRosters = [updatedRosterObj, ...otherRosters];
+
+      const updatedEmployees = (state?.employees || []).map((emp) => {
+        if (String(emp.id) === String(employee.id) || (employee.code && String(emp.code) === String(employee.code))) {
+          const updatedBranchesDetails = (emp.branchesDetails || []).map((bd) => {
+            if (String(bd.branchId) === String(employee.branchId || employee.primaryBranchId)) {
+              return { ...bd, schedule: updatedSchedule };
+            }
+            return bd;
+          });
+          return {
+            ...emp,
+            branchesDetails: updatedBranchesDetails.length > 0 ? updatedBranchesDetails : emp.branchesDetails,
+            roster: { ...(emp.roster || {}), schedule: updatedSchedule },
+            updatedAt: nowIso
+          };
+        }
+        return emp;
+      });
+
+      // أيضاً إلغاء أو تسوية أي طلب قديم لنفس التاريخ كي لا يعود ليخطف اليوم نهائياً
+      const updatedRequests = (state?.requests || []).map((r) => {
+        if (
+          r && (String(r.employeeId) === String(employee.id) || (employee.code && String(r.employeeCode) === String(employee.code))) &&
+          (r.date === targetDay.dateStr || (r.schedule && r.schedule[targetDay.dateStr]) || (r.newSchedule && r.newSchedule[targetDay.dateStr]))
+        ) {
+          const newSched = r.schedule ? { ...r.schedule } : null;
+          if (newSched) delete newSched[targetDay.dateStr];
+          const newNewSched = r.newSchedule ? { ...r.newSchedule } : null;
+          if (newNewSched) delete newNewSched[targetDay.dateStr];
+
+          return {
+            ...r,
+            schedule: newSched,
+            newSchedule: newNewSched,
+            supersededByAdmin: true,
+            status: 'superseded',
+            updatedAt: nowIso
+          };
+        }
+        return r;
+      });
+
+      const interimState = {
+        ...state,
+        rosters: updatedRosters,
+        employees: updatedEmployees,
+        requests: updatedRequests
+      };
+
+      let reconciledState = interimState;
+      let reconSummary = null;
+      try {
+        const reconRes = reconcileEmployeeScheduleOrPunchChange({
+          employeeId: employee.id,
+          changedDates: [targetDay.dateStr],
+          state: interimState,
+          options: {
+            reason: `تعديل شفت يوم ${targetDay.dayName} (${targetDay.dateStr})`,
+            clearPenaltiesOnChangedDates: false
+          }
+        });
+        if (reconRes && reconRes.updatedState) {
+          reconciledState = reconRes.updatedState;
+          reconSummary = reconRes.summary;
+        }
+      } catch (reconErr) {
+        console.warn('[RosterPreviewModal] Recon non-critical warn:', reconErr);
+      }
+
+      // ⚡ 1. إغلاق نافذة تعديل الشفت فوراً وبشكل لحظي دون أي انتظار (< 10ms)
+      setEditingDay(null);
+      setSavingDayEdit(false);
+
+      // ⚡ 2. تحديث الحالة فوراً على الشاشة (Optimistic UI)
+      setState?.(reconciledState);
+
+      // ⚡ 3. إظهار إشعار النجاح فوراً للمستخدم
+      if (reconSummary?.waivedDeductionMinutes > 0) {
+        showToast?.(`✅ تم حفظ شفت يوم ${targetDay.dayName} وإسقاط ${reconSummary.waivedDeductionMinutes} دقيقة تأخير (${reconSummary.waivedAmount} ج.م) تلقائياً!`, 'success');
+      } else {
+        showToast?.(`✅ تم حفظ وتثبيت شفت يوم ${targetDay.dayName} (${targetDay.dateStr}) وتحديث ساعات العمل بنجاح`, 'success');
+      }
+
+      // ⚡ 4. بث التغيير وحفظه في الذاكرة المحلية فوراً
       saveStateLocally(reconciledState).catch(() => {});
       broadcastStateChange(reconciledState);
-    }
 
-    if (reconSummary?.waivedDeductionMinutes > 0) {
-      showToast?.(`✅ تم حفظ شفت يوم ${editingDay.dayName} وإسقاط ${reconSummary.waivedDeductionMinutes} دقيقة تأخير (${reconSummary.waivedAmount} ج.م) تلقائياً!`, 'success');
-    } else {
-      showToast?.(`✅ تم حفظ وتثبيت شفت يوم ${editingDay.dayName} (${editingDay.dateStr}) وتحديث ساعات العمل بنجاح`, 'success');
+      // ⚡ 5. المزامنة الذرية في الخلفية مع الخادم دون تجميد واجهة المستخدم إطلاقاً
+      (async () => {
+        try {
+          const rosterFromDate = updatedRosterObj?.fromDate;
+          const rosterToDate = updatedRosterObj?.toDate;
+          const scheduleDates = Object.keys(updatedRosterObj?.schedule || {}).filter(k => /^\d{4}-\d{2}-\d{2}$/.test(k));
+          const minDate = rosterFromDate || (scheduleDates.length > 0 ? scheduleDates.slice().sort()[0] : null);
+          const maxDate = rosterToDate || (scheduleDates.length > 0 ? scheduleDates.slice().sort().reverse()[0] : null);
+
+          const isDateInCycle = (d) => {
+            if (!d) return false;
+            if (minDate && maxDate) return d >= minDate && d <= maxDate;
+            return !targetMonthKey || String(d).slice(0, 7) === targetMonthKey;
+          };
+
+          const empShifts = (reconciledState.shifts || []).filter(s =>
+            s && (String(s.employeeId) === String(employee.id) || (employee.code && String(s.employeeCode) === String(employee.code))) &&
+            isDateInCycle(s.date)
+          );
+          const empIncidents = (reconciledState.lateIncidents || []).filter(inc =>
+            inc && (String(inc.employeeId) === String(employee.id) || (employee.code && String(inc.employeeCode) === String(employee.code))) &&
+            isDateInCycle(inc.date)
+          );
+          const empOnly = (reconciledState.employees || []).filter(e =>
+            e && (String(e.id) === String(employee.id) || (employee.code && String(e.code) === String(employee.code)))
+          );
+
+          await apiSaveRosterAtomic({
+            employeeId: employee.id,
+            employeeCode: employee.code || '',
+            employeeName: employee.name || '',
+            month: targetMonthKey,
+            fromDate: minDate,
+            toDate: maxDate,
+            branchId: employee.branchId || null,
+            roster: updatedRosterObj,
+            rosters: [updatedRosterObj],
+            employees: empOnly,
+            shifts: empShifts,
+            lateIncidents: empIncidents,
+            requests: reconciledState.requests,
+            notifications: reconciledState.notifications
+          });
+        } catch (atomicErr) {
+          console.warn('[RosterAtomicSave] Background sync fallback in RosterPreviewModal:', atomicErr);
+          if (saveState) {
+            saveState(reconciledState, { entityType: 'rosters' }).catch(err => {
+              console.error('[RosterSave] Fallback failed:', err);
+              showToast?.('⚠️ تعذر المزامنة السحابية، تم حفظ التعديل محلياً', 'warning');
+            });
+          }
+        }
+      })();
+    } catch (saveErr) {
+      console.error('Error saving day edit:', saveErr);
+      showToast?.('❌ حدث خطأ أثناء حفظ شفت اليوم');
+      setEditingDay(null);
+      setSavingDayEdit(false);
     }
-    setEditingDay(null);
   };
 
   const modalJSX = (
@@ -698,16 +826,27 @@ export default function RosterPreviewModal({
                     </thead>
                     <tbody>
                       {cycleDates.map((item) => {
-                        let daySched = getEmployeeDaySchedule(employee.id, item.dateStr, state);
+                        let daySched = getEmployeeDaySchedule(employee.id, item.dateStr, state, employee.branchId || employee.primaryBranchId);
                         if (!daySched && singleSchedule) {
                           const jsDay = new Date(item.dateStr + 'T00:00:00').getDay();
                           daySched = getDayScheduleFromMap(singleSchedule, jsDay, item.dateStr);
                         }
                         const isOff = daySched?.type === 'off' || daySched?.isOff === true;
                         const notScheduled = !daySched || (!isOff && !daySched.start && !daySched.end);
-                        const checkIn = daySched?.start || (isOff ? '—' : '—');
-                        const checkOut = daySched?.end || (isOff ? '—' : '—');
-                        const hours = daySched?.hours !== undefined ? daySched.hours : (isOff ? 0 : (checkIn !== '—' && checkOut !== '—' ? (employee.workHoursPerDay || 8) : 0));
+                        const checkIn = (!isOff && daySched?.start) ? daySched.start : '—';
+                        const checkOut = (!isOff && daySched?.end) ? daySched.end : '—';
+                        let hours = 0;
+                        if (!notScheduled && !isOff) {
+                          if (checkIn !== '—' && checkOut !== '—') {
+                            hours = calculateHoursBetween(checkIn, checkOut);
+                          }
+                          if (!hours && daySched?.hours !== undefined) {
+                            hours = Number(daySched.hours) || 0;
+                          }
+                          if (!hours && employee.workHoursPerDay) {
+                            hours = Number(employee.workHoursPerDay) || 8;
+                          }
+                        }
                         const isToday = item.dateStr === (getRealTodayStr ? getRealTodayStr() : new Date().toISOString().slice(0, 10));
 
                         return (
@@ -1051,7 +1190,12 @@ export default function RosterPreviewModal({
                       <input
                         type="time"
                         value={editStart}
-                        onChange={(e) => setEditStart(e.target.value)}
+                        onChange={(e) => {
+                          const val = e.target.value;
+                          setEditStart(val);
+                          const h = calculateHoursBetween(val, editEnd);
+                          if (h > 0) setEditHours(h);
+                        }}
                         style={{ width: '100%', padding: '8px 10px', borderRadius: '8px', border: '1px solid var(--border)', fontSize: '13px', background: 'var(--surface, #fff)', color: 'var(--text)' }}
                       />
                     </div>
@@ -1063,7 +1207,12 @@ export default function RosterPreviewModal({
                       <input
                         type="time"
                         value={editEnd}
-                        onChange={(e) => setEditEnd(e.target.value)}
+                        onChange={(e) => {
+                          const val = e.target.value;
+                          setEditEnd(val);
+                          const h = calculateHoursBetween(editStart, val);
+                          if (h > 0) setEditHours(h);
+                        }}
                         style={{ width: '100%', padding: '8px 10px', borderRadius: '8px', border: '1px solid var(--border)', fontSize: '13px', background: 'var(--surface, #fff)', color: 'var(--text)' }}
                       />
                     </div>
@@ -1075,7 +1224,7 @@ export default function RosterPreviewModal({
                     </label>
                     <input
                       type="number"
-                      min="1"
+                      min="0.5"
                       max="24"
                       step="0.5"
                       value={editHours}
@@ -1113,9 +1262,29 @@ export default function RosterPreviewModal({
                 type="button"
                 className="btn btn-primary"
                 onClick={handleSaveDayEdit}
-                style={{ padding: '8px 20px', fontSize: '13px', fontWeight: 800, background: 'var(--primary, #0d9488)', color: '#fff', border: 'none', borderRadius: '8px', cursor: 'pointer' }}
+                disabled={savingDayEdit}
+                style={{
+                  padding: '8px 20px',
+                  fontSize: '13px',
+                  fontWeight: 800,
+                  background: savingDayEdit ? 'var(--muted, #94a3b8)' : 'var(--primary, #0d9488)',
+                  color: '#fff',
+                  border: 'none',
+                  borderRadius: '8px',
+                  cursor: savingDayEdit ? 'not-allowed' : 'pointer',
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  gap: '6px'
+                }}
               >
-                💾 حفظ وتثبيت الشفت
+                {savingDayEdit ? (
+                  <>
+                    <span style={{ width: '14px', height: '14px', border: '2px solid #fff', borderTopColor: 'transparent', borderRadius: '50%', display: 'inline-block', animation: 'spin 0.6s linear infinite' }} />
+                    <span>جاري الحفظ...</span>
+                  </>
+                ) : (
+                  <>💾 حفظ وتثبيت الشفت</>
+                )}
               </button>
             </div>
           </div>

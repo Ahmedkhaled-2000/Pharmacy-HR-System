@@ -202,6 +202,17 @@ export default function OwnerCommandLaunchpadModal({
       actionText: 'فتح الحسابات'
     },
     {
+      id: 'stock',
+      title: 'المخازن المركزية (PharmaOS Stock)',
+      icon: '📦',
+      desc: 'المخازن، التحويلات، التشغيلات، الجرد، والتسويات',
+      badge: 'المخازن والتوريد',
+      gradient: 'linear-gradient(135deg, #0284c7 0%, #0369a1 100%)',
+      lightBg: 'rgba(2, 132, 199, 0.07)',
+      borderColor: 'rgba(2, 132, 199, 0.3)',
+      actionText: 'فتح المخازن'
+    },
+    {
       id: 'permissions',
       title: 'صلاحيات وهوية النظام',
       icon: '👑',
@@ -378,7 +389,7 @@ export default function OwnerCommandLaunchpadModal({
 
           <div style={{
             display: 'grid',
-            gridTemplateColumns: 'repeat(4, 1fr)',
+            gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))',
             gap: '10px'
           }}>
             {coreSystems.map((sys) => (

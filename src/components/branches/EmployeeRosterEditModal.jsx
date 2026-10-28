@@ -80,7 +80,10 @@ export default function EmployeeRosterEditModal({
     if (!isBranchManager && branchFilter) {
       list = list.filter(e =>
         String(e.branchId || '') === String(branchFilter) ||
-        (e.branchesDetails && e.branchesDetails.some(bd => String(bd.branchId) === String(branchFilter)))
+        (e.branchesDetails && e.branchesDetails.some(bd => 
+          String(bd.branchId) === String(branchFilter) &&
+          !bd.isResigned && !bd.resigned && bd.status !== 'resigned' && bd.status !== 'cycle_terminated' && bd.status !== 'terminated' && !bd.isTerminatedInCycle
+        ))
       );
     }
 
@@ -109,7 +112,10 @@ export default function EmployeeRosterEditModal({
     if (!isBranchManager && branchFilter) {
       pool = pool.filter(e =>
         String(e.branchId || '') === String(branchFilter) ||
-        (e.branchesDetails && e.branchesDetails.some(bd => String(bd.branchId) === String(branchFilter)))
+        (e.branchesDetails && e.branchesDetails.some(bd => 
+          String(bd.branchId) === String(branchFilter) &&
+          !bd.isResigned && !bd.resigned && bd.status !== 'resigned' && bd.status !== 'cycle_terminated' && bd.status !== 'terminated' && !bd.isTerminatedInCycle
+        ))
       );
     }
     return pool.filter(e => {
@@ -144,21 +150,33 @@ export default function EmployeeRosterEditModal({
 
   const availableBranchesForEmp = useMemo(() => {
     if (!targetEmp) return allBranches;
-    if (Array.isArray(targetEmp.branchesDetails) && targetEmp.branchesDetails.length > 0) {
-      return targetEmp.branchesDetails.map((bd, idx) => {
-        const bObj = allBranches.find(b => String(b.id) === String(bd.branchId));
-        const roleLabel = targetEmp.isFloatingStaff
-          ? 'تغطية طوارئ'
-          : (idx === 0 || bd.isPrimary ? 'الأساسي' : 'منتدب');
-        return {
-          id: bd.branchId,
-          name: bObj ? bObj.name : (bd.branchName || `فرع ${bd.branchId}`),
-          roleLabel
-        };
-      });
+    // إذا كان الموظف متعدد الفروع وله فروع متعددة معتمدة
+    if (isMultiBranchEmp && Array.isArray(targetEmp.branchesDetails) && targetEmp.branchesDetails.length > 0) {
+      const activeBranches = targetEmp.branchesDetails.filter(bd => bd && bd.branchId && !bd.isResigned && !bd.resigned && bd.status !== 'resigned');
+      if (activeBranches.length > 0) {
+        return activeBranches.map((bd, idx) => {
+          const bObj = allBranches.find(b => String(b.id) === String(bd.branchId));
+          const roleLabel = targetEmp.isFloatingStaff
+            ? 'تغطية طوارئ'
+            : (idx === 0 || bd.isPrimary ? 'الأساسي' : 'منتدب');
+          return {
+            id: bd.branchId,
+            name: bObj ? bObj.name : (bd.branchName || `فرع ${bd.branchId}`),
+            roleLabel
+          };
+        });
+      }
+    }
+    // إذا كان موظفاً عادياً يعمل في فرع واحد محدد، نعرض فرعه الوحيد فقط
+    const singleBId = targetEmp.branchId || targetEmp.primaryBranchId || branchId;
+    if (singleBId) {
+      const bObj = allBranches.find(b => String(b.id) === String(singleBId));
+      if (bObj) {
+        return [{ id: bObj.id, name: bObj.name, roleLabel: 'الأساسي' }];
+      }
     }
     return allBranches;
-  }, [targetEmp, allBranches]);
+  }, [targetEmp, allBranches, isMultiBranchEmp, branchId]);
 
   const defaultBranchId = useMemo(() => {
     return targetEmp?.primaryBranchId || (targetEmp?.branchesDetails?.[0]?.branchId) || targetEmp?.branchId || branchId || allBranches[0]?.id || '';
@@ -226,9 +244,18 @@ export default function EmployeeRosterEditModal({
 
   const [notes, setNotes] = useState('');
   const [submitting, setSubmitting] = useState(false);
+  const initializedWeeklyKeyRef = useRef('');
 
-  // تحديث المدخلات عند تبديل الموظف المستهدف
+  // تحديث المدخلات عند تبديل الموظف المستهدف أو دورة الشهر فقط مع حماية تعديلات المستخدم الحالية
   useEffect(() => {
+    if (!targetEmp?.id) return;
+    const currentKey = `${targetEmp.id}_${selectedMonth}`;
+    if (initializedWeeklyKeyRef.current === currentKey) {
+      // 🛡️ الحصانة المطلقة: تم تحميل النمط الأسبوعي لهذا الموظف والشهر مسبقاً، نمنع مسح أي تعديلات نشطة
+      return;
+    }
+    initializedWeeklyKeyRef.current = currentKey;
+
     const res = {};
     const base = existingRoster?.schedule && typeof existingRoster.schedule === 'object'
       ? existingRoster.schedule
@@ -248,15 +275,19 @@ export default function EmployeeRosterEditModal({
       setFromDate(cycleRange.startDate);
       if (cycleRange.endDate) setToDate(cycleRange.endDate);
     }
-  }, [targetEmp?.id, existingRoster, cycleRange]);
+  }, [targetEmp?.id, selectedMonth, cycleRange]);
 
   // ── دوال مساعدة لحساب الساعات واسترجاع الورديات ──
   const calculateShiftHours = (start, end) => {
     if (!start || !end) return 0;
-    const [sH, sM] = start.split(':').map(Number);
-    const [eH, eM] = end.split(':').map(Number);
-    let diff = (eH * 60 + eM) - (sH * 60 + sM);
-    if (diff <= 0) diff += 24 * 60;
+    const [sH, sM] = String(start).slice(0, 5).split(':').map(Number);
+    const [eH, eM] = String(end).slice(0, 5).split(':').map(Number);
+    if (isNaN(sH) || isNaN(eH)) return 0;
+    const sMins = sH * 60 + (sM || 0);
+    const eMins = eH * 60 + (eM || 0);
+    if (sMins === eMins) return 0;
+    let diff = eMins - sMins;
+    if (diff < 0) diff += 24 * 60;
     return Math.round((diff / 60) * 10) / 10;
   };
 
@@ -607,14 +638,24 @@ export default function EmployeeRosterEditModal({
   });
 
   const lastEmpIdRef = useRef(targetEmp?.id);
+  const initializedScheduleKeyRef = useRef('');
 
-  // مزامنة أيام الشهر عند تغيير الموظف أو دورة الشهر مع تحصين ضد تسرب بيانات موظف سابق
+  // مزامنة أيام الشهر عند تغيير الموظف أو دورة الشهر مع تحصين ضد تسرب بيانات موظف سابق وضمان عدم ارتداد التعديلات الحالية
   useEffect(() => {
-    if (!cycleDays || cycleDays.length === 0) return;
-    const isDifferentEmp = String(lastEmpIdRef.current) !== String(targetEmp?.id);
-    lastEmpIdRef.current = targetEmp?.id;
+    if (!cycleDays || cycleDays.length === 0 || !targetEmp?.id) return;
+    const currentKey = `${targetEmp.id}_${selectedMonth}_${defaultBranchId}`;
+    const isDifferentKey = initializedScheduleKeyRef.current !== currentKey;
 
     setMonthlyDaysSchedule((prev) => {
+      // 🛡️ الحصانة المطلقة: إذا كان الموظف والشهر والفرع كما هم، وتمت تهيئة الجدول من قبل، ولدينا أيام مسجلة في الحالة الحالية:
+      // احتفظ بحالة المستخدم الحالية prev ولا تعد ضبطها نهائياً لمنع أي ارتداد للتعديلات الحالية!
+      if (!isDifferentKey && prev && Object.keys(prev).length >= cycleDays.length) {
+        return prev;
+      }
+
+      initializedScheduleKeyRef.current = currentKey;
+      lastEmpIdRef.current = targetEmp.id;
+
       const updated = {};
       const defBId = defaultBranchId;
       const defBObj = allBranches.find(b => String(b.id) === String(defBId));
@@ -634,23 +675,51 @@ export default function EmployeeRosterEditModal({
           };
           return;
         }
-        if (existingRoster?.schedule && existingRoster.schedule[day.dateStr]) {
-          const rawItem = existingRoster.schedule[day.dateStr];
-          const bObj = allBranches.find(b => String(b.id) === String(rawItem.branchId));
-          const sList = getDayShiftsList(rawItem);
-          updated[day.dateStr] = {
-            branchId: rawItem.branchId || defBId,
-            branchName: rawItem.branchName || (bObj ? bObj.name : defBName),
-            ...rawItem,
-            shifts: sList
-          };
-        } else if (!isDifferentEmp && prev && prev[day.dateStr]) {
-          const sList = getDayShiftsList(prev[day.dateStr]);
+
+        // إذا كان نفس الموظف والشهر ولديه تعديل مسبق في prev، الأولوية القصوى لتعديل المستخدم في prev!
+        if (!isDifferentKey && prev && prev[day.dateStr]) {
+          let sList = getDayShiftsList(prev[day.dateStr]);
+          if (!isMultiBranchEmp) {
+            sList = sList.filter(s => !s.branchId || String(s.branchId) === String(defBId));
+          }
+          const isDayOff = prev[day.dateStr].type === 'off' || prev[day.dateStr].isOff === true;
+          const cleanHours = isDayOff ? 0 : (!isMultiBranchEmp ? (calculateShiftHours(prev[day.dateStr].start, prev[day.dateStr].end) || 8) : (Number(prev[day.dateStr].hours) || 8));
           updated[day.dateStr] = {
             branchId: prev[day.dateStr].branchId || defBId,
             branchName: prev[day.dateStr].branchName || defBName,
             ...prev[day.dateStr],
-            shifts: sList
+            hours: cleanHours,
+            shifts: sList,
+            ...(!isMultiBranchEmp ? {
+              hasSecondShift: false,
+              secondShift: null,
+              otherBranchShifts: [],
+              otherBranchSecondShift: null,
+              isMultiShiftDay: false
+            } : {})
+          };
+        } else if (existingRoster?.schedule && existingRoster.schedule[day.dateStr]) {
+          const rawItem = existingRoster.schedule[day.dateStr];
+          const bObj = allBranches.find(b => String(b.id) === String(rawItem.branchId));
+          let sList = getDayShiftsList(rawItem);
+          if (!isMultiBranchEmp) {
+            sList = sList.filter(s => !s.branchId || String(s.branchId) === String(defBId));
+          }
+          const isDayOff = rawItem.type === 'off' || rawItem.isOff === true;
+          const cleanHours = isDayOff ? 0 : (!isMultiBranchEmp ? (calculateShiftHours(rawItem.start, rawItem.end) || 8) : (Number(rawItem.hours) || 8));
+          updated[day.dateStr] = {
+            branchId: rawItem.branchId || defBId,
+            branchName: rawItem.branchName || (bObj ? bObj.name : defBName),
+            ...rawItem,
+            hours: cleanHours,
+            shifts: sList,
+            ...(!isMultiBranchEmp ? {
+              hasSecondShift: false,
+              secondShift: null,
+              otherBranchShifts: [],
+              otherBranchSecondShift: null,
+              isMultiShiftDay: false
+            } : {})
           };
         } else {
           const weeklyConf = (existingRoster?.schedule && existingRoster.schedule[day.dayLabel]) || scheduleInputs[day.dayLabel] || DEFAULT_SCHEDULE[day.dayLabel];
@@ -688,7 +757,7 @@ export default function EmployeeRosterEditModal({
       });
       return updated;
     });
-  }, [cycleDays, existingRoster, targetEmp?.id, defaultBranchId, allBranches]);
+  }, [cycleDays, targetEmp?.id, selectedMonth, defaultBranchId]);
 
   // ── دوال إدارة الورديات المتعددة لأيام الشهر التفاعلي (دعم N فروع وورديات متعددة باليوم) ──
   const handleAddDayShift = (dateStr, preferredBranchId) => {
@@ -749,7 +818,21 @@ export default function EmployeeRosterEditModal({
   const handleUpdateDayShift = (dateStr, shiftIdx, field, value) => {
     setMonthlyDaysSchedule((prev) => {
       const cur = prev[dateStr] || { type: 'shift', isOff: false, branchId: defaultBranchId };
-      const curShifts = [...getDayShiftsList(cur)];
+      let curShifts = [...getDayShiftsList(cur)];
+      if (!isMultiBranchEmp) {
+        curShifts = curShifts.filter(s => !s.branchId || String(s.branchId) === String(defaultBranchId));
+        if (curShifts.length === 0) {
+          curShifts = [{
+            id: `shift_${dateStr}_1`,
+            shiftIndex: 1,
+            branchId: String(defaultBranchId),
+            branchName: branchName || '',
+            start: cur.start || '08:00',
+            end: cur.end || '16:00',
+            hours: calculateShiftHours(cur.start || '08:00', cur.end || '16:00')
+          }];
+        }
+      }
       if (!curShifts[shiftIdx]) return prev;
 
       const targetShift = { ...curShifts[shiftIdx] };
@@ -766,7 +849,9 @@ export default function EmployeeRosterEditModal({
       }
 
       curShifts[shiftIdx] = targetShift;
-      const totalHours = curShifts.reduce((acc, s) => acc + (Number(s.hours) || 0), 0);
+      const totalHours = !isMultiBranchEmp
+        ? (calculateShiftHours(curShifts[0]?.start, curShifts[0]?.end) || 0)
+        : curShifts.reduce((acc, s) => acc + (calculateShiftHours(s.start, s.end) || Number(s.hours) || 0), 0);
 
       return {
         ...prev,
@@ -780,8 +865,13 @@ export default function EmployeeRosterEditModal({
           hours: Math.round(totalHours * 10) / 10,
           branchId: curShifts[0]?.branchId || defaultBranchId,
           branchName: curShifts[0]?.branchName || '',
-          hasSecondShift: curShifts.length > 1,
-          secondShift: curShifts[1] ? { ...curShifts[1] } : null
+          hasSecondShift: !isMultiBranchEmp ? false : (curShifts.length > 1),
+          secondShift: !isMultiBranchEmp ? null : (curShifts[1] ? { ...curShifts[1] } : null),
+          ...(!isMultiBranchEmp ? {
+            otherBranchShifts: [],
+            otherBranchSecondShift: null,
+            isMultiShiftDay: false
+          } : {})
         }
       };
     });
@@ -1152,11 +1242,7 @@ export default function EmployeeRosterEditModal({
       showToast?.('⚠️ يرجى تحديد وقت البداية ووقت النهاية');
       return;
     }
-    const [sH, sM] = defaultShiftStart.split(':').map(Number);
-    const [eH, eM] = defaultShiftEnd.split(':').map(Number);
-    let diff = (eH * 60 + eM) - (sH * 60 + sM);
-    if (diff <= 0) diff += 24 * 60;
-    const hours = Math.round((diff / 60) * 10) / 10;
+    const hours = calculateShiftHours(defaultShiftStart, defaultShiftEnd);
 
     const isTargetAll = !defaultApplyBranchId || defaultApplyBranchId === 'all';
     const targetBObj = allBranches.find(b => String(b.id) === String(defaultApplyBranchId));
@@ -1379,12 +1465,22 @@ export default function EmployeeRosterEditModal({
         offDaysCount++;
       } else {
         workDaysCount++;
-        const shifts = getDayShiftsList(conf);
+        let shifts = getDayShiftsList(conf);
+        if (!isMultiBranchEmp) {
+          shifts = shifts.filter(s => !s.branchId || String(s.branchId) === String(defaultBranchId));
+        }
         if (shifts.length > 1) multiShiftsCount++;
         let dayHours = 0;
-        shifts.forEach((s) => {
-          dayHours += s.hours !== undefined ? Number(s.hours) : 8;
-        });
+        if (!isMultiBranchEmp) {
+          const sStart = conf.start || shifts[0]?.start || '08:00';
+          const sEnd = conf.end || shifts[0]?.end || '16:00';
+          dayHours = calculateShiftHours(sStart, sEnd) || 8;
+        } else {
+          shifts.forEach((s) => {
+            const sh = calculateShiftHours(s.start, s.end) || (s.hours !== undefined ? Number(s.hours) : 8);
+            dayHours += sh;
+          });
+        }
         totalMonthHours += dayHours;
       }
     });
@@ -1396,7 +1492,7 @@ export default function EmployeeRosterEditModal({
       dualShiftsCount: multiShiftsCount,
       totalDays: cycleDays.length
     };
-  }, [cycleDays, monthlyDaysSchedule]);
+  }, [cycleDays, monthlyDaysSchedule, isMultiBranchEmp, defaultBranchId]);
 
   // حساب توزيع ساعات العمل والورديات لكل فرع للموظف متعدد الفروع
   const branchDistributionStats = useMemo(() => {
@@ -1483,9 +1579,13 @@ export default function EmployeeRosterEditModal({
         ...state,
         rosters: [candidateRoster, ...(state?.rosters || []).filter(r => String(r.employeeId) !== String(targetEmp.id))]
       };
+      const candidateSchedule = { ...scheduleInputs, ...monthlyDaysSchedule };
+      const candidateDateKeys = Object.keys(candidateSchedule).filter(k => /^\d{4}-\d{2}-\d{2}$/.test(k));
       const { summary } = reconcileEmployeeScheduleOrPunchChange({
         employeeId: targetEmp.id,
-        state: tempState
+        changedDates: candidateDateKeys,
+        state: tempState,
+        options: { clearPenaltiesOnChangedDates: false }
       });
       return summary;
     } catch {
@@ -1575,18 +1675,47 @@ export default function EmployeeRosterEditModal({
       Object.keys(safeInputs).forEach((k) => {
         const item = safeInputs[k];
         if (item && !item.isPreHire && item.type !== 'off' && !item.isOff) {
-          const sList = getDayShiftsList(item);
-          safeInputs[k] = {
-            ...item,
-            shifts: sList,
-            start: sList[0]?.start || item.start || '',
-            end: sList[0]?.end || item.end || '',
-            hours: Math.round(sList.reduce((acc, s) => acc + (Number(s.hours) || 0), 0) * 10) / 10,
-            branchId: sList[0]?.branchId || item.branchId || defaultBranchId,
-            branchName: sList[0]?.branchName || item.branchName || '',
-            hasSecondShift: sList.length > 1,
-            secondShift: sList[1] ? { ...sList[1] } : null
-          };
+          let sList = getDayShiftsList(item);
+          if (!isMultiBranchEmp) {
+            sList = sList.filter(s => !s.branchId || String(s.branchId) === String(defaultBranchId));
+            const primaryStart = item.start || sList[0]?.start || '08:00';
+            const primaryEnd = item.end || sList[0]?.end || '16:00';
+            const dayH = calculateShiftHours(primaryStart, primaryEnd) || 8;
+            safeInputs[k] = {
+              ...item,
+              shifts: [{
+                id: `shift_${k}_1`,
+                shiftIndex: 1,
+                branchId: defaultBranchId,
+                branchName: branchName || '',
+                start: primaryStart,
+                end: primaryEnd,
+                hours: dayH
+              }],
+              start: primaryStart,
+              end: primaryEnd,
+              hours: dayH,
+              branchId: defaultBranchId,
+              branchName: branchName || '',
+              hasSecondShift: false,
+              secondShift: null,
+              otherBranchShifts: [],
+              otherBranchSecondShift: null,
+              isMultiShiftDay: false
+            };
+          } else {
+            safeInputs[k] = {
+              ...item,
+              shifts: sList,
+              start: sList[0]?.start || item.start || '',
+              end: sList[0]?.end || item.end || '',
+              hours: Math.round(sList.reduce((acc, s) => acc + (calculateShiftHours(s.start, s.end) || Number(s.hours) || 0), 0) * 10) / 10,
+              branchId: sList[0]?.branchId || item.branchId || defaultBranchId,
+              branchName: sList[0]?.branchName || item.branchName || '',
+              hasSecondShift: sList.length > 1,
+              secondShift: sList[1] ? { ...sList[1] } : null
+            };
+          }
         }
       });
       // 🛡️ الحصانة المطلقة: تأمين وتثبيت أيام ما قبل التعيين كأيام راحة خارج نطاق التعاقد
@@ -1616,9 +1745,33 @@ export default function EmployeeRosterEditModal({
         // ─────────────────────────────────────────────────────────────
         // الحالة الأولى: الإدارة العليا (Admin) ➔ اعتماد وحفظ فوري مباشر
         // ─────────────────────────────────────────────────────────────
-        // 🌟 حصر معرفات الروستر القديمة لتسجيلها في شواهد القبور ومنع ارتدادها من الكاش
+        // 🌟 حصر شامل ودقيق لأي روستر سابق لهذا الموظف لنفس الدورة/الشهر لمنع التضارب نهائياً
+        const isTargetEmpRosterForSameCycle = (r) => {
+          if (!r) return false;
+          const isTargetEmp = (
+            String(r.employeeId) === String(targetEmp.id) ||
+            String(r.employeeId) === String(targetEmp.code) ||
+            (targetEmp.code && String(r.employeeCode) === String(targetEmp.code)) ||
+            (targetEmp.id && String(r.employeeCode) === String(targetEmp.id))
+          );
+          if (!isTargetEmp) return false;
+
+          const rMonth = String(r.month || '').trim().slice(0, 7);
+          const targetMonth = String(selectedMonth || '').trim().slice(0, 7);
+
+          const monthMatches = !rMonth || (targetMonth && rMonth === targetMonth);
+          const idMatches = Boolean(targetMonth && typeof r.id === 'string' && r.id.includes(targetMonth));
+          const dateOverlaps = Boolean(
+            cycleRange && r.fromDate && r.toDate &&
+            r.fromDate <= cycleRange.endDate && r.toDate >= cycleRange.startDate
+          );
+
+          return monthMatches || idMatches || dateOverlaps;
+        };
+
+        // 🌟 حصر معرفات الروستر القديمة لتسجيلها في شواهد القبور وحذفها ذرياً من السيرفر
         const replacedRosterIds = (state?.rosters || [])
-          .filter(r => (String(r.employeeId) === String(targetEmp.id) || (targetEmp.code && String(r.employeeCode) === String(targetEmp.code))) && (r.month === selectedMonth || !r.month))
+          .filter(isTargetEmpRosterForSameCycle)
           .map(r => r.id)
           .filter(Boolean);
 
@@ -1631,13 +1784,8 @@ export default function EmployeeRosterEditModal({
           // 🌟 تقسيم ذكي وتلقائي لكل فرع على حدة مع جدول موحد رئيسي متكامل
           const branchSplits = splitUnifiedRosterForBranches(safeInputs, targetEmp, allBranches);
 
-          // حذف أي جداول سابقة لهذا الموظف لنفس الشهر لمنع التكرار أو التضارب
-          const otherEmpRosters = (state?.rosters || []).filter((r) =>
-            !(
-              (String(r.employeeId) === String(targetEmp.id) || (targetEmp.code && String(r.employeeCode) === String(targetEmp.code))) &&
-              (r.month === selectedMonth || !r.month)
-            )
-          );
+          // حذف أي جداول سابقة لهذا الموظف لنفس الدورة لمنع التكرار أو التضارب
+          const otherEmpRosters = (state?.rosters || []).filter((r) => !isTargetEmpRosterForSameCycle(r));
 
           // 1. الجدول الموحد الرئيسي الشامل
           masterRosterObj = {
@@ -1687,13 +1835,8 @@ export default function EmployeeRosterEditModal({
           updatedRosters = [masterRosterObj, ...branchRosterObjs, ...otherEmpRosters];
         } else {
           // موظف عادي فرع واحد
-          // حذف كافة الجداول السابقة لهذا الموظف لنفس الشهر لمنع التكرار والتضارب
-          const otherEmpRosters = (state?.rosters || []).filter((r) =>
-            !(
-              (String(r.employeeId) === String(targetEmp.id) || (targetEmp.code && String(r.employeeCode) === String(targetEmp.code))) &&
-              (r.month === selectedMonth || !r.month)
-            )
-          );
+          // حذف كافة الجداول السابقة لهذا الموظف لنفس الدورة لمنع التكرار والتضارب
+          const otherEmpRosters = (state?.rosters || []).filter((r) => !isTargetEmpRosterForSameCycle(r));
 
           const rosterId = `roster_${targetEmp.id}_${selectedMonth}`;
           newRosterObj = {
@@ -1704,6 +1847,7 @@ export default function EmployeeRosterEditModal({
             branchId: effectiveBranchId,
             branchName: effectiveBranchName,
             isFloatingStaff: Boolean(targetEmp.isFloatingStaff),
+            isUnifiedMaster: true,
             month: selectedMonth,
             fromDate: fromDate || cycleRange?.startDate,
             toDate: toDate || cycleRange?.endDate,
@@ -1720,21 +1864,20 @@ export default function EmployeeRosterEditModal({
           updatedRosters = [newRosterObj, ...otherEmpRosters];
         }
 
-        // أيضاً اعتماد أي طلبات روستر معلقة لهذا الموظف لنفس الشهر لإبقاء النظام متسقاً
+        // 🌟 حسم وتجاوز أي طلبات روستر أو تعديل شيفت سابقة لهذا الموظف لنفس الشهر كي لا تعود لتخطف الجدول المعتمد
         const updatedRequests = (state?.requests || []).map((r) => {
           if (
+            r &&
             (String(r.employeeId) === String(targetEmp.id) || (targetEmp.code && String(r.employeeCode) === String(targetEmp.code))) &&
-            (r.month === selectedMonth || !r.month) &&
-            (r.type === 'roster_update' || r.type === 'roster_edit' || r.type === 'roster_edit_request') &&
-            (r.status === 'pending' || r.status === 'pending_admin' || r.status === 'pending_branch')
+            (r.month === selectedMonth || !r.month || (r.date && r.date.startsWith(selectedMonth))) &&
+            (r.type === 'roster_update' || r.type === 'roster_edit' || r.type === 'roster_edit_request' || r.type === 'schedule_edit' || r.type === 'shift_adjustment')
           ) {
             return {
               ...r,
-              status: 'approved',
-              adminApproved: true,
-              branchApproved: true,
-              approvedAt: new Date().toISOString(),
-              approvedBy: 'الإدارة العليا'
+              status: 'superseded',
+              supersededByAdmin: true,
+              supersededAt: new Date().toISOString(),
+              supersededReason: 'تم استبداله وتعيين جدول رسمي جديد ومباشر من الإدارة العليا'
             };
           }
           return r;
@@ -1774,8 +1917,15 @@ export default function EmployeeRosterEditModal({
         } else if (targetEmp) {
           updatedEmployees = (state?.employees || []).map((emp) => {
             if (String(emp.id) === String(targetEmp.id)) {
+              const cleanedBranches = (emp.branchesDetails || []).map((bd) => {
+                if (String(bd.branchId) === String(defaultBranchId)) {
+                  return { ...bd, schedule: safeInputs };
+                }
+                return bd;
+              });
               return {
                 ...emp,
+                branchesDetails: cleanedBranches.length > 0 ? cleanedBranches : emp.branchesDetails,
                 roster: { ...(emp.roster || {}), schedule: safeInputs }
               };
             }
@@ -1791,68 +1941,97 @@ export default function EmployeeRosterEditModal({
           notifications: [newNotification, ...(state?.notifications || [])]
         };
 
-        // 🌟 رصد التواريخ التي تم تعديلها أو تعيينها في الجدول لإسقاط أي جزاءات سابقة عليها
+        // 🌟 رصد التواريخ التي تم تعيينها في الجدول لمقارنة جميع أيام الدورة بالبصمات الفعلية
         const cycleDateKeys = Object.keys(safeInputs).filter(k => /^\d{4}-\d{2}-\d{2}$/.test(k));
-        const prevSchedule = existingRoster?.schedule || {};
-        const changedDatesList = cycleDateKeys.filter(d => {
-          const prev = prevSchedule[d] || {};
-          const cur = safeInputs[d] || {};
-          return prev.type !== cur.type || prev.start !== cur.start || prev.end !== cur.end || prev.isOff !== cur.isOff;
-        });
-        const effectiveChangedDates = changedDatesList.length > 0 ? changedDatesList : cycleDateKeys;
+        const effectiveChangedDates = cycleDateKeys;
 
         // 🌟 التسوية الذكية التلقائية اللحظية بين المواعيد الجديدة وبصمات الحضور السابقة
         const { updatedState: reconciledState, summary: reconSummary } = reconcileEmployeeScheduleOrPunchChange({
           employeeId: targetEmp.id,
           changedDates: effectiveChangedDates,
           state: updatedState,
-          options: { reason: 'تعديل واعتماد الجدول الشهري', clearPenaltiesOnChangedDates: true }
+          options: { reason: 'تعديل واعتماد الجدول الشهري', clearPenaltiesOnChangedDates: false }
         });
 
+        // ⚡ 1. تحديث الحالة فوراً على الشاشة (Optimistic UI)
         setState?.(reconciledState);
 
-        // 🌟 حفظ ذري موحد فائق السرعة عبر نقطة الاتصال المركزية الجديدة للسيرفر (< 20ms)
-        let atomicSaveSuccess = false;
-        try {
-          const newRostersList = isMultiBranchEmp ? [masterRosterObj, ...branchRosterObjs].filter(Boolean) : [newRosterObj].filter(Boolean);
-          const newRosterIds = new Set(newRostersList.map(r => r?.id).filter(Boolean));
-          const safeDeletedRosterIds = (replacedRosterIds || []).filter(id => !newRosterIds.has(id));
+        // ⚡ 2. بث التغيير وحفظه في الذاكرة المحلية فوراً
+        saveStateLocally(reconciledState).catch(() => {});
+        broadcastStateChange(reconciledState);
 
-          await apiSaveRosterAtomic({
-            employeeId: targetEmp.id,
-            employeeCode: targetEmp.code || '',
-            employeeName: targetEmp.name,
-            month: selectedMonth,
-            branchId: effectiveBranchId,
-            branchName: effectiveBranchName,
-            roster: isMultiBranchEmp ? masterRosterObj : newRosterObj,
-            rosters: newRostersList,
-            employees: reconciledState.employees,
-            shifts: reconciledState.shifts,
-            lateIncidents: reconciledState.lateIncidents,
-            requests: reconciledState.requests,
-            notifications: reconciledState.notifications,
-            deletedRosterIds: safeDeletedRosterIds
-          });
-          atomicSaveSuccess = true;
-        } catch (atomicErr) {
-          console.warn('[RosterAtomicSave] Fallback to standard saveState:', atomicErr);
-        }
-
-        // إذا نجح الحفظ الذري المباشر، نكتفي بالتحديث المحلي السريع وبث التغيير دون إرسال حمولة 4.8MB
-        // وإذا تعثر الحفظ الذري فقط نلجأ إلى saveState الاحتياطية
-        if (!atomicSaveSuccess && saveState) {
-          await saveState(reconciledState, { entityType: 'rosters' });
-        } else if (atomicSaveSuccess) {
-          saveStateLocally(reconciledState).catch(() => {});
-          broadcastStateChange(reconciledState);
-        }
-
+        // ⚡ 3. إظهار إشعار النجاح فوراً للمستخدم
         if (reconSummary?.waivedDeductionMinutes > 0) {
-          showToast?.(`✅ تم اعتماد الجدول وإسقاط ${reconSummary.waivedDeductionMinutes} دقيقة خصم (${reconSummary.waivedAmount} ج.م) تلقائياً لتطابق الحضور!`);
+          showToast?.(`✅ تم اعتماد الجدول وإسقاط ${reconSummary.waivedDeductionMinutes} دقيقة خصم (${reconSummary.waivedAmount} ج.م) تلقائياً لتطابق الحضور!`, 'success');
         } else {
-          showToast?.(`✅ تم تعيين واعتماد الجدول الشهري للموظف (${targetEmp.name}) بنجاح!`);
+          showToast?.(`✅ تم تعيين واعتماد الجدول الشهري للموظف (${targetEmp.name}) بنجاح!`, 'success');
         }
+
+        // ⚡ 4. إغلاق النافذة فوراً وبشكل لحظي دون أي انتظار (< 10ms)
+        onClose?.();
+
+        // ⚡ 5. المزامنة الذرية في الخلفية مع الخادم دون تجميد واجهة المستخدم إطلاقاً
+        (async () => {
+          let atomicSaveSuccess = false;
+          try {
+            const newRostersList = isMultiBranchEmp ? [masterRosterObj, ...branchRosterObjs].filter(Boolean) : [newRosterObj].filter(Boolean);
+            const newRosterIds = new Set(newRostersList.map(r => r?.id).filter(Boolean));
+            const safeDeletedRosterIds = (replacedRosterIds || []).filter(id => !newRosterIds.has(id));
+
+            const effectiveFromDate = fromDate || cycleRange?.startDate || (cycleDateKeys.length > 0 ? cycleDateKeys.slice().sort()[0] : null);
+            const effectiveToDate = toDate || cycleRange?.endDate || (cycleDateKeys.length > 0 ? cycleDateKeys.slice().sort().reverse()[0] : null);
+
+            const isDateInRosterCycle = (d) => {
+              if (!d) return false;
+              if (effectiveFromDate && effectiveToDate) {
+                return d >= effectiveFromDate && d <= effectiveToDate;
+              }
+              return !selectedMonth || String(d).slice(0, 7) === selectedMonth;
+            };
+
+            // ⚡ حمولة مركزة ودقيقة للغاية تشمل كامل نطاق دورة الروستر (من 21 السابق إلى 20 الحالي)
+            const changedShifts = (reconciledState.shifts || []).filter(s =>
+              s && (String(s.employeeId) === String(targetEmp.id) || (targetEmp.code && String(s.employeeCode) === String(targetEmp.code))) &&
+              isDateInRosterCycle(s.date)
+            );
+            const changedEmployees = (reconciledState.employees || []).filter(e =>
+              e && (String(e.id) === String(targetEmp.id) || (targetEmp.code && String(e.code) === String(targetEmp.code)))
+            );
+            const changedLateIncidents = (reconciledState.lateIncidents || []).filter(inc =>
+              inc && (String(inc.employeeId) === String(targetEmp.id) || (targetEmp.code && String(inc.employeeCode) === String(targetEmp.code))) &&
+              isDateInRosterCycle(inc.date)
+            );
+
+            await apiSaveRosterAtomic({
+              employeeId: targetEmp.id,
+              employeeCode: targetEmp.code || '',
+              employeeName: targetEmp.name,
+              month: selectedMonth,
+              fromDate: effectiveFromDate,
+              toDate: effectiveToDate,
+              branchId: effectiveBranchId,
+              branchName: effectiveBranchName,
+              roster: isMultiBranchEmp ? masterRosterObj : newRosterObj,
+              rosters: newRostersList,
+              employees: changedEmployees,
+              shifts: changedShifts,
+              lateIncidents: changedLateIncidents,
+              requests: reconciledState.requests,
+              notifications: reconciledState.notifications,
+              deletedRosterIds: safeDeletedRosterIds
+            });
+            atomicSaveSuccess = true;
+          } catch (atomicErr) {
+            console.warn('[RosterAtomicSave] Background sync fallback:', atomicErr);
+          }
+
+          if (!atomicSaveSuccess && saveState) {
+            saveState(reconciledState, { entityType: 'rosters' }).catch(err => {
+              console.error('[RosterSave] Fallback failed:', err);
+              showToast?.('⚠️ تعذر المزامنة السحابية، تم حفظ الجدول محلياً', 'warning');
+            });
+          }
+        })();
       } else {
         // ─────────────────────────────────────────────────────────────
         // الحالة الثانية: مدير الفرع (Branch Manager) ➔ إنشاء طلب اعتماد للإدارة
@@ -1899,32 +2078,36 @@ export default function EmployeeRosterEditModal({
           requests: updatedRequests
         };
 
+        // ⚡ 1. تحديث الحالة فوراً على الشاشة (Optimistic UI)
         setState?.(updatedState);
         saveStateLocally(updatedState).catch(() => {});
         broadcastStateChange(updatedState);
+        showToast?.(`✅ تم إعداد الجدول للموظف (${targetEmp.name}) وإرسال طلب الاعتماد للإدارة العليا بنجاح`, 'success');
 
-        try {
-          await apiSubmitRequestAtomic(newRosterReq);
-        } catch (atomicReqErr) {
-          console.warn('[BranchManager RosterReq] Fallback to saveState:', atomicReqErr);
-          if (saveState) await saveState(updatedState, { entityType: 'requests' });
-        }
+        // ⚡ 2. إغلاق النافذة فوراً وبشكل لحظي دون أي انتظار (< 10ms)
+        onClose?.();
 
-        // إشعار الإدارة العليا عبر Gmail
-        try {
-          notifyAdminOnNewRequest({
-            state: updatedState,
-            newRequest: newRosterReq,
-            empName: targetEmp.name
-          });
-        } catch (mailErr) {
-          console.warn('Mail notification error:', mailErr);
-        }
+        // ⚡ 3. المزامنة السحابية وإرسال الإشعار في الخلفية
+        (async () => {
+          try {
+            await apiSubmitRequestAtomic(newRosterReq);
+          } catch (atomicReqErr) {
+            console.warn('[BranchManager RosterReq] Fallback to saveState:', atomicReqErr);
+            if (saveState) saveState(updatedState, { entityType: 'requests' }).catch(() => {});
+          }
 
-        showToast?.(`✅ تم إعداد الجدول للموظف (${targetEmp.name}) وإرسال طلب الاعتماد للإدارة العليا بنجاح`);
+          // إشعار الإدارة العليا عبر Gmail
+          try {
+            notifyAdminOnNewRequest({
+              state: updatedState,
+              newRequest: newRosterReq,
+              empName: targetEmp.name
+            });
+          } catch (mailErr) {
+            console.warn('Mail notification error:', mailErr);
+          }
+        })();
       }
-
-      onClose?.();
     } catch (err) {
       console.error('Error saving employee roster:', err);
       showToast?.('❌ حدث خطأ أثناء حفظ الجدول الشهري');
@@ -2909,16 +3092,28 @@ export default function EmployeeRosterEditModal({
                               {isOff ? (
                                 <span style={{ color: '#b45309', fontSize: '11px' }}>0 س</span>
                               ) : (
-                                <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
-                                  <span style={{ color: 'var(--primary, #0f766e)', fontSize: '12.5px', fontWeight: 900 }}>
-                                    {Math.round(dayShifts.reduce((acc, s) => acc + (Number(s.hours) || 0), 0) * 10) / 10} س
-                                  </span>
-                                  {isMultiBranchEmp && dayShifts.length > 1 && (
-                                    <span style={{ fontSize: '9px', color: '#0369a1', fontWeight: 800 }}>
-                                      ({dayShifts.length} ورديات)
-                                    </span>
-                                  )}
-                                </div>
+                                (() => {
+                                  const displayRowHours = !isMultiBranchEmp
+                                    ? calculateShiftHours(conf.start || '08:00', conf.end || '16:00')
+                                    : (activeBranchTab === 'all'
+                                        ? Math.round(dayShifts.reduce((acc, s) => acc + (calculateShiftHours(s.start, s.end) || Number(s.hours) || 0), 0) * 10) / 10
+                                        : Math.round(dayShifts.filter(s => String(s.branchId) === String(activeBranchTab)).reduce((acc, s) => acc + (calculateShiftHours(s.start, s.end) || Number(s.hours) || 0), 0) * 10) / 10
+                                      );
+                                  const shiftCount = !isMultiBranchEmp ? 1 : (activeBranchTab === 'all' ? dayShifts.length : dayShifts.filter(s => String(s.branchId) === String(activeBranchTab)).length);
+
+                                  return (
+                                    <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
+                                      <span style={{ color: 'var(--primary, #0f766e)', fontSize: '12.5px', fontWeight: 900 }}>
+                                        {displayRowHours} س
+                                      </span>
+                                      {isMultiBranchEmp && shiftCount > 1 && (
+                                        <span style={{ fontSize: '9px', color: '#0369a1', fontWeight: 800 }}>
+                                          ({shiftCount} ورديات)
+                                        </span>
+                                      )}
+                                    </div>
+                                  );
+                                })()
                               )}
                             </td>
                           </tr>

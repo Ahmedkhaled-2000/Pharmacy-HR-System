@@ -1024,17 +1024,30 @@ export function getEmployeeScheduledDayDetails(empObj, dateStr, stateData, targe
   // 3. فحص جداول العمل المعتمدة في state.rosters مع مطابقة الفرع المستهدف
   const approvedRosters = (stateData?.rosters || []).filter(r => {
     if (!r) return false;
-    const isApproved = r.status === 'approved' || r.adminApproved === true || !r.status;
+    const isApproved = r.status === 'approved' || r.status === 'active' || r.status === 'معتمد' || r.adminApproved === true || r.branchApproved === true || !r.status;
     if (!isApproved) return false;
     const isEmp = String(r.employeeId) === empId || (empCode && String(r.employeeCode) === empCode);
     if (!isEmp) return false;
-    if (r.fromDate && r.toDate) return dateStr >= r.fromDate && dateStr <= r.toDate;
+    if (r.fromDate && r.toDate && dateStr >= r.fromDate && dateStr <= r.toDate) return true;
     if (r.month && dateStr.startsWith(r.month)) return true;
+    if (r.month && /^\d{4}-\d{2}$/.test(r.month)) {
+      const [y, m] = r.month.split('-').map(Number);
+      const prevY = m === 1 ? y - 1 : y;
+      const prevM = m === 1 ? 12 : m - 1;
+      const cycleStart = `${prevY}-${String(prevM).padStart(2, '0')}-21`;
+      const cycleEnd = `${y}-${String(m).padStart(2, '0')}-20`;
+      if (dateStr >= cycleStart && dateStr <= cycleEnd) return true;
+    }
     return false;
   });
 
   if (approvedRosters.length > 0) {
     approvedRosters.sort((a, b) => {
+      // 🌟 أولوية مطلقة للجدول الذي يحتوي على تاريخ اليوم بالذات في schedule
+      const hasDateA = (a.schedule && a.schedule[dateStr]) ? 1 : 0;
+      const hasDateB = (b.schedule && b.schedule[dateStr]) ? 1 : 0;
+      if (hasDateA !== hasDateB) return hasDateB - hasDateA;
+
       if (targetBIdStr) {
         const matchA = String(a.branchId || '').trim() === targetBIdStr ? 1 : 0;
         const matchB = String(b.branchId || '').trim() === targetBIdStr ? 1 : 0;
@@ -2169,6 +2182,16 @@ export function registerBiometricRoutes(app, db, io, redis, getSettingsFromStora
     if (!shift || !shift.overtimeHours || parseFloat(shift.overtimeHours) <= 0) return shift;
     const isApproved = Boolean(shift.overtimeStatus === 'approved' || shift.adminApproved || shift.isAdminCreated);
     if (isApproved) return shift;
+
+    // 🛡️ صمام أمان حديدي: إذا كانت ساعات العمل الفعلية أقل من أو تساوي ساعات الوردية المقررة، يُمنع منعاً باتاً إنشاء طلب إضافي!
+    const workedHours = parseFloat(shift.actualWorkedHours || shift.hours || shift.netHours) || 0;
+    const schedHoursVal = parseFloat(shift.scheduledHours) || 0;
+    if (schedHoursVal > 0 && workedHours <= schedHoursVal) {
+      shift.overtimeHours = 0;
+      shift.regularHours = workedHours;
+      shift.overtimeStatus = 'none';
+      return shift;
+    }
 
     const otHours = Math.round(parseFloat(shift.overtimeHours) * 100) / 100;
     if (otHours <= 0) return shift;
@@ -3334,11 +3357,16 @@ export function registerBiometricRoutes(app, db, io, redis, getSettingsFromStora
             calcHours = Math.max(0, Math.round((rawElapsed - bHours) * 100) / 100);
           }
 
+          // 🌟 استخراج تفاصيل الوردية المجدولة الرسمية للموظف أولاً من محرك الجداول المعتمد
+          const outSchedDetails = getEmployeeScheduledDayDetails(matchedEmpObj, effectiveDate, state, origShift?.branchId || effectiveShiftBranchId);
+          const outSchedStart = (!outSchedDetails?.isOff && outSchedDetails?.start) ? outSchedDetails.start : origShift?.scheduledStart;
+          const outSchedEnd = (!outSchedDetails?.isOff && outSchedDetails?.end) ? outSchedDetails.end : origShift?.scheduledEnd;
+
           // 🌟 حساب الساعات المجدولة والوقت الإضافي وفق القواعد الدقيقة:
           // 1) إذا كان الموظف مسجلاً في ملفه كـ "مواعيد متغيرة / ليس له جدول شهري" (noMonthlySchedule):
           //    يتم احتساب الساعات المجدولة والإضافي حصراً من ساعات عمل الملف الشخصي (workHoursPerDay).
           // 2) إذا كان للموظف جدول شهري معتمد:
-          //    يتم فحص موعد الوردية في الجدول لهذا اليوم (وإذا كان راحة أسبوعية مجدولة يعتبر العمل كله إضافياً 100%).
+          //    يتم فحص موعد وساعات الوردية في الجدول لهذا اليوم (وإذا كان راحة أسبوعية مجدولة يعتبر العمل كله إضافياً 100%).
           const isFlexibleSchedule = Boolean(
             matchedEmpObj?.noMonthlySchedule ||
             matchedEmpObj?.hasVariableSchedule ||
@@ -3346,43 +3374,32 @@ export function registerBiometricRoutes(app, db, io, redis, getSettingsFromStora
             matchedEmpObj?.scheduleType === 'flexible'
           );
 
-          let schedH = parseFloat(origShift?.scheduledHours);
+          let schedH = undefined;
           let isScheduledOff = false;
 
           if (isFlexibleSchedule) {
             // الموظفون ذوو المواعيد المتغيرة: لا يعتمد على الروستر بل على ساعات الملف الشخصي
             schedH = parseFloat(matchedEmpObj?.workHoursPerDay || matchedEmpObj?.workHours || 8);
-          } else {
-            if (isNaN(schedH) || schedH === undefined || schedH === null) {
-              const targetMonth = (effectiveDate || datePart).slice(0, 7);
-              const empRoster = (state?.rosters || []).find(r =>
-                r && (String(r.employeeId) === String(matchedEmpId) || (matchedEmpObj?.code && String(r.employeeCode) === String(matchedEmpObj.code))) &&
-                (r.month === targetMonth || (!r.month && (!r.fromDate || r.fromDate.slice(0, 7) === targetMonth))) &&
-                r.status !== 'rejected' && r.status !== 'cancelled'
-              );
-
-              if (empRoster?.schedule) {
-                const dayEntry = empRoster.schedule[effectiveDate];
-                if (dayEntry) {
-                  if (dayEntry.isOff || dayEntry.type === 'off') {
-                    isScheduledOff = true;
-                    schedH = 0;
-                  } else if (dayEntry.start && dayEntry.end) {
-                    const [sH, sM] = String(dayEntry.start).split(':').map(Number);
-                    const [eH, eM] = String(dayEntry.end).split(':').map(Number);
-                    if (!isNaN(sH) && !isNaN(eH)) {
-                      let diffM = (eH * 60 + (eM || 0)) - (sH * 60 + (sM || 0));
-                      if (diffM < 0) diffM += 24 * 60;
-                      schedH = Math.round((diffM / 60) * 100) / 100;
-                    }
-                  } else if (dayEntry.hours) {
-                    schedH = parseFloat(dayEntry.hours) || 8;
-                  }
-                }
+          } else if (outSchedDetails) {
+            if (outSchedDetails.isOff || outSchedDetails.type === 'off') {
+              isScheduledOff = true;
+              schedH = 0;
+            } else if (!isNaN(parseFloat(outSchedDetails.hours)) && parseFloat(outSchedDetails.hours) > 0) {
+              schedH = parseFloat(outSchedDetails.hours);
+            } else if (outSchedDetails.start && outSchedDetails.end) {
+              const [sH, sM] = String(outSchedDetails.start).split(':').map(Number);
+              const [eH, eM] = String(outSchedDetails.end).split(':').map(Number);
+              if (!isNaN(sH) && !isNaN(eH)) {
+                let diffM = (eH * 60 + (eM || 0)) - (sH * 60 + (sM || 0));
+                if (diffM < 0) diffM += 24 * 60;
+                schedH = Math.round((diffM / 60) * 100) / 100;
               }
             }
           }
 
+          if (isNaN(schedH) || schedH === undefined || schedH === null) {
+            schedH = parseFloat(origShift?.scheduledHours);
+          }
           if (isNaN(schedH) || schedH === undefined || schedH === null) {
             schedH = parseFloat(matchedEmpObj?.workHoursPerDay || matchedEmpObj?.workHours || 8);
           }
@@ -3397,9 +3414,6 @@ export function registerBiometricRoutes(app, db, io, redis, getSettingsFromStora
             : (origShift?.notes || '')
           ).trim();
 
-          const outSchedDetails = getEmployeeScheduledDayDetails(matchedEmpObj, effectiveDate, state, origShift?.branchId || effectiveShiftBranchId);
-          const outSchedStart = origShift?.scheduledStart || ((!outSchedDetails?.isOff && outSchedDetails?.start) ? outSchedDetails.start : undefined);
-          const outSchedEnd = origShift?.scheduledEnd || ((!outSchedDetails?.isOff && outSchedDetails?.end) ? outSchedDetails.end : undefined);
           let shiftLateMins = origShift?.lateMinutes;
           if ((shiftLateMins === undefined || shiftLateMins === null) && outSchedStart && inTime) {
             const [sH, sM] = outSchedStart.split(':').map(Number);

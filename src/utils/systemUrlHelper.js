@@ -345,3 +345,6 @@ export function getResolvedWhatsAppServerUrl(state = null) {
 
   return 'https://169-58-214-20.sslip.io/whatsapp';
 }
+
+export const getWhatsAppServerUrl = getResolvedWhatsAppServerUrl;
+

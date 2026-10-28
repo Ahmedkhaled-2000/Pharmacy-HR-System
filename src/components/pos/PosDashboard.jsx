@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { usePOS } from '../../context/POSContext';
 import { useAuth } from '../../context/AuthContext';
 import { arabicWeekday } from '../../utils/formatters';
@@ -25,7 +25,8 @@ import {
   Bike,
   Crown,
   BookOpen,
-  LogOut
+  LogOut,
+  ChevronDown
 } from 'lucide-react';
 
 export default function PosDashboard() {
@@ -41,14 +42,48 @@ export default function PosDashboard() {
     setIsOcrModalOpen,
     setIsShortcutsGuideOpen,
     setIsReportsModalOpen,
+    reportsActiveTab,
+    setReportsActiveTab,
     setIsDeliveryModalOpen,
     setIsBranchStockModalOpen,
     setIsOwnerHubOpen,
+    setIsWhatsAppModalOpen,
+    setIsCustomerModalOpen,
     pendingSyncCount
   } = usePOS();
 
   const { currentBranch, currentEmpUser, authRole } = useAuth?.() || {};
   const terminalCode = localStorage.getItem('app_pos_terminal') || 'POS-01';
+
+  // ── قائمة التقارير المنسدلة الذكية ──
+  const [showReportsDropdown, setShowReportsDropdown] = useState(false);
+  const reportsDropdownRef = useRef(null);
+
+  useEffect(() => {
+    if (!showReportsDropdown) return;
+    const handleClickOutside = (e) => {
+      if (reportsDropdownRef.current && !reportsDropdownRef.current.contains(e.target)) {
+        setShowReportsDropdown(false);
+      }
+    };
+    const handleKeyDown = (e) => {
+      if (e.key === 'Escape') {
+        setShowReportsDropdown(false);
+      }
+    };
+    document.addEventListener('mousedown', handleClickOutside);
+    window.addEventListener('keydown', handleKeyDown);
+    return () => {
+      document.removeEventListener('mousedown', handleClickOutside);
+      window.removeEventListener('keydown', handleKeyDown);
+    };
+  }, [showReportsDropdown]);
+
+  const handleSelectReport = (tabId) => {
+    setReportsActiveTab?.(tabId);
+    setIsReportsModalOpen(true);
+    setShowReportsDropdown(false);
+  };
 
   // ── الساعة الرقمية اللحظية ──
   const [currentTime, setCurrentTime] = useState(() => new Date());
@@ -247,27 +282,448 @@ export default function PosDashboard() {
           )}
         </button>
 
-        {/* F4: مركز التقارير والرقابة */}
+        {/* العملاء المسجلين في النظام */}
         <button
           type="button"
-          onClick={() => setIsReportsModalOpen(true)}
+          onClick={() => setIsCustomerModalOpen(true)}
           style={{
             display: 'inline-flex',
             alignItems: 'center',
-            gap: '5px',
+            gap: '6px',
             padding: '6px 12px',
             borderRadius: '9px',
-            background: '#f0fdfa',
-            border: '1px solid #99f6e4',
-            color: '#0f766e',
+            background: '#ecfdf5',
+            border: '1.5px solid #a7f3d0',
+            color: '#065f46',
             fontSize: '12px',
             fontWeight: 800,
-            cursor: 'pointer'
+            cursor: 'pointer',
+            transition: 'all 0.15s ease'
           }}
+          title="عرض وإدارة وسجل العملاء المسجلين في النظام ورصيد المحافظ"
         >
-          <BarChart3 size={14} color="#0d9488" />
-          <span>التقارير [F4]</span>
+          <User size={14} color="#059669" />
+          <span>العملاء المسجلين</span>
         </button>
+
+        {/* F11: مركز واتساب الفرع لخدمة العملاء والفواتير الإلكترونية */}
+        <button
+          type="button"
+          onClick={() => setIsWhatsAppModalOpen(true)}
+          style={{
+            display: 'inline-flex',
+            alignItems: 'center',
+            gap: '6px',
+            padding: '6px 12px',
+            borderRadius: '9px',
+            background: '#f0fdf4',
+            border: '1.5px solid #86efac',
+            color: '#16a34a',
+            fontSize: '12px',
+            fontWeight: 800,
+            cursor: 'pointer',
+            transition: 'all 0.15s ease',
+            boxShadow: '0 2px 6px rgba(34, 197, 94, 0.12)'
+          }}
+          title="فتح مركز واتساب الفرع لإرسال الفواتير وتنبيهات الأدوية المزمنة وتحديثات الدليفري (F11)"
+        >
+          <span style={{ fontSize: '13px' }}>💬</span>
+          <span>واتساب الفرع [F11]</span>
+          <span
+            style={{
+              width: '7px',
+              height: '7px',
+              borderRadius: '50%',
+              background: '#22c55e',
+              display: 'inline-block',
+              boxShadow: '0 0 6px #22c55e'
+            }}
+          />
+        </button>
+
+        {/* F4: مركز التقارير والرقابة مع القائمة المنسدلة الذكية */}
+        <div style={{ position: 'relative' }} ref={reportsDropdownRef}>
+          <button
+            type="button"
+            onClick={() => setShowReportsDropdown((prev) => !prev)}
+            style={{
+              display: 'inline-flex',
+              alignItems: 'center',
+              gap: '6px',
+              padding: '6px 12px',
+              borderRadius: '9px',
+              background: showReportsDropdown ? '#ccfbf1' : '#f0fdfa',
+              border: '1.5px solid #99f6e4',
+              color: '#0f766e',
+              fontSize: '12px',
+              fontWeight: 800,
+              cursor: 'pointer',
+              transition: 'all 0.15s ease',
+              boxShadow: showReportsDropdown ? '0 0 0 3px rgba(13, 148, 136, 0.15)' : 'none'
+            }}
+            title="فتح قائمة تقارير الصيدلية السريعة أو مركز التقارير الشامل [F4]"
+          >
+            <BarChart3 size={14} color="#0d9488" />
+            <span>التقارير [F4]</span>
+            <ChevronDown
+              size={13}
+              style={{
+                transform: showReportsDropdown ? 'rotate(180deg)' : 'rotate(0deg)',
+                transition: 'transform 0.2s ease'
+              }}
+            />
+          </button>
+
+          {/* القائمة المنسدلة للتقارير السريعة */}
+          {showReportsDropdown && (
+            <div
+              style={{
+                position: 'absolute',
+                top: 'calc(100% + 8px)',
+                right: 0,
+                zIndex: 99999,
+                background: '#ffffff',
+                border: '1px solid #cbd5e1',
+                borderRadius: '16px',
+                boxShadow: '0 20px 45px -10px rgba(15, 23, 42, 0.25), 0 0 0 1px rgba(15, 23, 42, 0.05)',
+                width: '340px',
+                padding: '12px',
+                direction: 'rtl',
+                animation: 'posFadeIn 0.15s ease-out',
+                display: 'flex',
+                flexDirection: 'column',
+                gap: '10px'
+              }}
+            >
+              {/* رأس القائمة */}
+              <div
+                style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'space-between',
+                  paddingBottom: '8px',
+                  borderBottom: '1px solid #f1f5f9'
+                }}
+              >
+                <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                  <BarChart3 size={16} color="#0d9488" />
+                  <span style={{ fontSize: '13px', fontWeight: 900, color: '#0f172a' }}>
+                    تقارير الصيدلية والرقابة المالية
+                  </span>
+                </div>
+                <span
+                  style={{
+                    fontSize: '10.5px',
+                    padding: '2px 6px',
+                    borderRadius: '6px',
+                    background: '#f0fdfa',
+                    color: '#0d9488',
+                    fontWeight: 800,
+                    border: '1px solid #ccfbf1'
+                  }}
+                >
+                  F4
+                </span>
+              </div>
+
+              {/* قسم 1: المبيعات والورديات */}
+              <div>
+                <div style={{ fontSize: '11px', fontWeight: 800, color: '#64748b', marginBottom: '4px', paddingRight: '4px' }}>
+                  📊 المبيعات وحركة الورديات
+                </div>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '2px' }}>
+                  <button
+                    type="button"
+                    onClick={() => handleSelectReport('shifts')}
+                    style={{
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'space-between',
+                      padding: '7px 10px',
+                      borderRadius: '8px',
+                      background: 'transparent',
+                      border: 'none',
+                      color: '#1e293b',
+                      fontSize: '12px',
+                      fontWeight: 700,
+                      cursor: 'pointer',
+                      textAlign: 'right',
+                      transition: 'background 0.12s'
+                    }}
+                    onMouseEnter={(e) => (e.currentTarget.style.background = '#f8fafc')}
+                    onMouseLeave={(e) => (e.currentTarget.style.background = 'transparent')}
+                  >
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                      <span>⏱️</span>
+                      <span>تقرير الوردية ودرج النقدية (X/Z Report)</span>
+                    </div>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => handleSelectReport('sales')}
+                    style={{
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'space-between',
+                      padding: '7px 10px',
+                      borderRadius: '8px',
+                      background: 'transparent',
+                      border: 'none',
+                      color: '#1e293b',
+                      fontSize: '12px',
+                      fontWeight: 700,
+                      cursor: 'pointer',
+                      textAlign: 'right',
+                      transition: 'background 0.12s'
+                    }}
+                    onMouseEnter={(e) => (e.currentTarget.style.background = '#f8fafc')}
+                    onMouseLeave={(e) => (e.currentTarget.style.background = 'transparent')}
+                  >
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                      <span>🧾</span>
+                      <span>شريط فواتير المبيعات اليومية</span>
+                    </div>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => handleSelectReport('kpis')}
+                    style={{
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'space-between',
+                      padding: '7px 10px',
+                      borderRadius: '8px',
+                      background: 'transparent',
+                      border: 'none',
+                      color: '#1e293b',
+                      fontSize: '12px',
+                      fontWeight: 700,
+                      cursor: 'pointer',
+                      textAlign: 'right',
+                      transition: 'background 0.12s'
+                    }}
+                    onMouseEnter={(e) => (e.currentTarget.style.background = '#f8fafc')}
+                    onMouseLeave={(e) => (e.currentTarget.style.background = 'transparent')}
+                  >
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                      <span>🎯</span>
+                      <span>إنتاجية الكاشير ومتوسط السلة</span>
+                    </div>
+                  </button>
+                </div>
+              </div>
+
+              {/* قسم 2: حركة الأصناف والأدوية */}
+              <div>
+                <div style={{ fontSize: '11px', fontWeight: 800, color: '#64748b', marginBottom: '4px', paddingRight: '4px' }}>
+                  💊 حركة الأصناف والمخزون
+                </div>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '2px' }}>
+                  <button
+                    type="button"
+                    onClick={() => handleSelectReport('items')}
+                    style={{
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'space-between',
+                      padding: '7px 10px',
+                      borderRadius: '8px',
+                      background: 'transparent',
+                      border: 'none',
+                      color: '#1e293b',
+                      fontSize: '12px',
+                      fontWeight: 700,
+                      cursor: 'pointer',
+                      textAlign: 'right',
+                      transition: 'background 0.12s'
+                    }}
+                    onMouseEnter={(e) => (e.currentTarget.style.background = '#f8fafc')}
+                    onMouseLeave={(e) => (e.currentTarget.style.background = 'transparent')}
+                  >
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                      <span>💊</span>
+                      <span>مبيعات الأصناف وتجزئة الشرائط</span>
+                    </div>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => handleSelectReport('items')}
+                    style={{
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'space-between',
+                      padding: '7px 10px',
+                      borderRadius: '8px',
+                      background: 'transparent',
+                      border: 'none',
+                      color: '#1e293b',
+                      fontSize: '12px',
+                      fontWeight: 700,
+                      cursor: 'pointer',
+                      textAlign: 'right',
+                      transition: 'background 0.12s'
+                    }}
+                    onMouseEnter={(e) => (e.currentTarget.style.background = '#f8fafc')}
+                    onMouseLeave={(e) => (e.currentTarget.style.background = 'transparent')}
+                  >
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                      <span>📉</span>
+                      <span>حركة النواقص والطلب الذكي</span>
+                    </div>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => handleSelectReport('items')}
+                    style={{
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'space-between',
+                      padding: '7px 10px',
+                      borderRadius: '8px',
+                      background: 'transparent',
+                      border: 'none',
+                      color: '#1e293b',
+                      fontSize: '12px',
+                      fontWeight: 700,
+                      cursor: 'pointer',
+                      textAlign: 'right',
+                      transition: 'background 0.12s'
+                    }}
+                    onMouseEnter={(e) => (e.currentTarget.style.background = '#f8fafc')}
+                    onMouseLeave={(e) => (e.currentTarget.style.background = 'transparent')}
+                  >
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                      <span>⏳</span>
+                      <span>رادار الصلاحيات والهلاك</span>
+                    </div>
+                  </button>
+                </div>
+              </div>
+
+              {/* قسم 3: الرقابة وكشف التلاعب والضرائب */}
+              <div>
+                <div style={{ fontSize: '11px', fontWeight: 800, color: '#64748b', marginBottom: '4px', paddingRight: '4px' }}>
+                  🛡️ الرقابة والامتثال المالي
+                </div>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '2px' }}>
+                  <button
+                    type="button"
+                    onClick={() => handleSelectReport('security')}
+                    style={{
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'space-between',
+                      padding: '7px 10px',
+                      borderRadius: '8px',
+                      background: 'transparent',
+                      border: 'none',
+                      color: '#1e293b',
+                      fontSize: '12px',
+                      fontWeight: 700,
+                      cursor: 'pointer',
+                      textAlign: 'right',
+                      transition: 'background 0.12s'
+                    }}
+                    onMouseEnter={(e) => (e.currentTarget.style.background = '#f8fafc')}
+                    onMouseLeave={(e) => (e.currentTarget.style.background = 'transparent')}
+                  >
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                      <span>🛡️</span>
+                      <span>سجل الرقابة ورادار التلاعب (Anti-Skimming)</span>
+                    </div>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => handleSelectReport('traffic')}
+                    style={{
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'space-between',
+                      padding: '7px 10px',
+                      borderRadius: '8px',
+                      background: 'transparent',
+                      border: 'none',
+                      color: '#1e293b',
+                      fontSize: '12px',
+                      fontWeight: 700,
+                      cursor: 'pointer',
+                      textAlign: 'right',
+                      transition: 'background 0.12s'
+                    }}
+                    onMouseEnter={(e) => (e.currentTarget.style.background = '#f8fafc')}
+                    onMouseLeave={(e) => (e.currentTarget.style.background = 'transparent')}
+                  >
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                      <span>📈</span>
+                      <span>ساعات الذروة والكثافة الشرائية</span>
+                    </div>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => handleSelectReport('sales')}
+                    style={{
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'space-between',
+                      padding: '7px 10px',
+                      borderRadius: '8px',
+                      background: 'transparent',
+                      border: 'none',
+                      color: '#1e293b',
+                      fontSize: '12px',
+                      fontWeight: 700,
+                      cursor: 'pointer',
+                      textAlign: 'right',
+                      transition: 'background 0.12s'
+                    }}
+                    onMouseEnter={(e) => (e.currentTarget.style.background = '#f8fafc')}
+                    onMouseLeave={(e) => (e.currentTarget.style.background = 'transparent')}
+                  >
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                      <span>🏛️</span>
+                      <span>إقرار ضريبة القيمة المضافة (VAT)</span>
+                    </div>
+                  </button>
+                </div>
+              </div>
+
+              {/* زر سفلي لفتح المركز الشامل */}
+              <div style={{ borderTop: '1px solid #f1f5f9', paddingTop: '8px' }}>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setIsReportsModalOpen(true);
+                    setShowReportsDropdown(false);
+                  }}
+                  style={{
+                    width: '100%',
+                    padding: '8px',
+                    borderRadius: '9px',
+                    background: '#0d9488',
+                    color: '#ffffff',
+                    border: 'none',
+                    fontSize: '12px',
+                    fontWeight: 800,
+                    cursor: 'pointer',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    gap: '6px'
+                  }}
+                >
+                  <BarChart3 size={14} />
+                  <span>فتح لوحة التقارير الشاملة [F4]</span>
+                </button>
+              </div>
+            </div>
+          )}
+        </div>
 
         {/* F9: مرتجع مبيعات */}
         <button

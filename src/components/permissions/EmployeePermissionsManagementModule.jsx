@@ -265,7 +265,8 @@ export default function EmployeePermissionsManagementModule({
             compensationType: compensationType || r.compensationType || 'paid',
             isUnpaid: compensationType === 'unpaid',
             isPaid: compensationType === 'paid',
-            approvedAt: new Date().toISOString()
+            approvedAt: new Date().toISOString(),
+            updatedAt: new Date().toISOString()
           };
         }
         return r;
@@ -305,7 +306,7 @@ export default function EmployeePermissionsManagementModule({
       };
 
       if (setState) setState(updatedState);
-      if (saveState) await saveState(updatedState);
+      if (saveState) await saveState(updatedState, { entityType: 'request', entityId: permId });
       showToast?.(`✅ تم اعتماد الإذن (${compensationType === 'unpaid' ? 'غير مدفوع الأجر / إعفاء فقط' : 'مدفوع الأجر / احتساب ساعات'}) وتعديل البصمة بنجاح`);
       if (previewReq?.id === permId) {
         setPreviewReq({ ...previewReq, status: 'approved', adminApproved: true, branchApproved: true, compensationType, isUnpaid: compensationType === 'unpaid' });
@@ -338,7 +339,8 @@ export default function EmployeePermissionsManagementModule({
             isRejected: true,
             adminApproved: false,
             branchApproved: false,
-            rejectedAt: new Date().toISOString()
+            rejectedAt: new Date().toISOString(),
+            updatedAt: new Date().toISOString()
           };
         }
         return r;
@@ -350,7 +352,7 @@ export default function EmployeePermissionsManagementModule({
       };
 
       if (setState) setState(updatedState);
-      if (saveState) await saveState(updatedState);
+      if (saveState) await saveState(updatedState, { entityType: 'request', entityId: permId });
       showToast?.('⚠️ تم رفض طلب الإذن');
       if (previewReq?.id === permId) {
         setPreviewReq({ ...previewReq, status: 'rejected', isRejected: true });

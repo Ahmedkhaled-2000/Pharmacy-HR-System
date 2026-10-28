@@ -1,6 +1,20 @@
 import React, { useState, useMemo } from 'react';
 import { calculateEmployeeLeaveStats, getEmployeeApprovedLeaves, getEmpDisplayName, isEmployeeActive, parseAnnualLeaveBalance, normalizeState } from '../../utils/formatters';
 import { loadExcelJS, mergedTitle, tableHeaderRow, dataRow } from '../../utils/excelExport';
+import { apiSubmitRequestAtomic } from '../../utils/apiClient';
+import { saveStateLocally, broadcastStateChange } from '../../utils/offlineSync';
+
+const LEAVE_TYPES = [
+  { key: 'annual', label: '🌴 إجازة سنوية اعتيادية', deduction: 'خصم من رصيد الإجازات السنوي' },
+  { key: 'casual', label: '🌴 إجازة عارضة', deduction: 'خصم من رصيد الإجازات السنوي' },
+  { key: 'sick', label: '🏥 إجازة مرضية (بتقرير طبي)', deduction: 'مدفوعة الأجر (أو حسب لائحة العمل)' },
+  { key: 'comp_off', label: '🛋️ إجازة بدل راحة (Comp-Off)', deduction: 'خصم من رصيد بدل الراحة المتاح للموظف' },
+  { key: 'unpaid', label: '💸 إجازة بدون راتب', deduction: 'غير مدفوعة (خصم من الراتب الشهري)' },
+  { key: 'marriage', label: '💍 إجازة زواج', deduction: 'إجازة مناسبة مدفوعة الأجر بالكامل' },
+  { key: 'maternity', label: '👶 إجازة وضع ورعاية طفل', deduction: 'إجازة أمومة ورعاية مدفوعة الأجر' },
+  { key: 'bereavement', label: '🖤 إجازة وفاة / حداد', deduction: 'إجازة عزاء رسمية مدفوعة الأجر' },
+  { key: 'official', label: '🏛️ إجازة رسمية / مأمورية', deduction: 'مهمة عمل رسمية مدفوعة الأجر' }
+];
 
 export default function LeavesTrackingModule({
   state,
@@ -18,6 +32,16 @@ export default function LeavesTrackingModule({
   const [editingBalanceType, setEditingBalanceType] = useState('annual'); // 'annual' | 'comp_off'
   const [newBalanceInput, setNewBalanceInput] = useState('');
   const [showCompOffSettings, setShowCompOffSettings] = useState(false);
+
+  // ── حالة نافذة منح إجازة رسمية من الإدارة العليا ──
+  const [showGrantLeaveModal, setShowGrantLeaveModal] = useState(false);
+  const [grantEmpId, setGrantEmpId] = useState('');
+  const [grantLeaveType, setGrantLeaveType] = useState('annual');
+  const [grantStartDate, setGrantStartDate] = useState(() => new Date().toISOString().slice(0, 10));
+  const [grantEndDate, setGrantEndDate] = useState(() => new Date().toISOString().slice(0, 10));
+  const [grantDaysCount, setGrantDaysCount] = useState(1);
+  const [grantReason, setGrantReason] = useState('');
+  const [isSubmittingGrant, setIsSubmittingGrant] = useState(false);
 
   // إعدادات سياسة إجازات بدل الراحة
   const [compOffPolicy, setCompOffPolicy] = useState(() => {
@@ -209,6 +233,180 @@ export default function LeavesTrackingModule({
     if (showToast) showToast('❌ تم رفض استحقاق بدل الراحة');
   };
 
+  // ── دوال حساب وإدارة منح إجازة رسمية للموظف من قبل الإدارة العليا ──
+  const calculateDays = (start, end) => {
+    if (!start || !end) return 1;
+    const s = new Date(start + 'T00:00:00');
+    const e = new Date(end + 'T00:00:00');
+    if (isNaN(s.getTime()) || isNaN(e.getTime())) return 1;
+    const diff = e.getTime() - s.getTime();
+    if (diff < 0) return 1;
+    return Math.floor(diff / (1000 * 60 * 60 * 24)) + 1;
+  };
+
+  const handleStartDateChange = (val) => {
+    setGrantStartDate(val);
+    let endVal = grantEndDate;
+    if (!endVal || endVal < val) {
+      endVal = val;
+      setGrantEndDate(val);
+    }
+    setGrantDaysCount(calculateDays(val, endVal));
+  };
+
+  const handleEndDateChange = (val) => {
+    setGrantEndDate(val);
+    setGrantDaysCount(calculateDays(grantStartDate, val));
+  };
+
+  const handleOpenGrantLeaveModal = (emp = null) => {
+    const today = new Date().toISOString().slice(0, 10);
+    const activeEmps = (state.employees || []).filter(isEmployeeActive);
+    const targetId = emp ? emp.id : (activeEmps[0]?.id || '');
+    setGrantEmpId(String(targetId || ''));
+    setGrantLeaveType('annual');
+    setGrantStartDate(today);
+    setGrantEndDate(today);
+    setGrantDaysCount(1);
+    setGrantReason('');
+    setIsSubmittingGrant(false);
+    setShowGrantLeaveModal(true);
+  };
+
+  const handleSaveGrantLeave = async (e) => {
+    if (e) e.preventDefault();
+    if (!grantEmpId) {
+      showToast?.('⚠️ يرجى اختيار الموظف أولاً');
+      return;
+    }
+    const targetEmp = (state.employees || []).find(emp => String(emp.id) === String(grantEmpId));
+    if (!targetEmp) {
+      showToast?.('⚠️ الموظف المحدد غير موجود');
+      return;
+    }
+
+    if (!grantStartDate) {
+      showToast?.('⚠️ يرجى تحديد تاريخ بداية الإجازة');
+      return;
+    }
+
+    const effectiveEnd = grantEndDate || grantStartDate;
+    if (effectiveEnd < grantStartDate) {
+      showToast?.('⚠️ تاريخ النهاية يجب أن يكون مساوياً أو بعد تاريخ البداية');
+      return;
+    }
+
+    const parsedDays = parseFloat(grantDaysCount) || 1;
+    if (parsedDays <= 0) {
+      showToast?.('⚠️ يجب أن يكون عدد الأيام أكبر من صفر');
+      return;
+    }
+
+    const currentCompOff = parseFloat(targetEmp.compOffBalance || 0) || 0;
+    if (grantLeaveType === 'comp_off' && currentCompOff < parsedDays) {
+      if (!window.confirm(`⚠️ رصيد بدل الراحة المتاح للموظف (${currentCompOff} يوم) أقل من عدد الأيام المطلوبة (${parsedDays} يوم). هل تريد المتابعة واعتماد الإجازة بقرار إداري استثنائي؟`)) {
+        return;
+      }
+    }
+
+    setIsSubmittingGrant(true);
+    const nowIso = new Date().toISOString();
+    const leaveId = `leave_admin_${targetEmp.id}_${Date.now()}`;
+    const targetEmpBranch = (state.branches || []).find(b => String(b.id) === String(targetEmp.branchId || targetEmp.primaryBranchId));
+    const leaveTypeInfo = LEAVE_TYPES.find(t => t.key === grantLeaveType);
+
+    const newLeaveReq = {
+      id: leaveId,
+      type: 'leave',
+      requestType: 'leave',
+      leaveType: grantLeaveType,
+      typeLabel: `إجازة ${leaveTypeInfo?.label || grantLeaveType}`,
+      employeeId: targetEmp.id,
+      employeeName: targetEmp.name,
+      employeeCode: targetEmp.code || '',
+      branchId: targetEmp.branchId || targetEmp.primaryBranchId || '',
+      branchName: targetEmpBranch?.name || targetEmp.branchName || '',
+      startDate: grantStartDate,
+      endDate: effectiveEnd,
+      date: grantStartDate,
+      daysCount: parsedDays,
+      days: parsedDays,
+      reason: grantReason.trim() || `إجازة ${leaveTypeInfo?.label || ''} ممنوحة بقرار الإدارة العليا`,
+      details: grantReason.trim() || `إجازة ${leaveTypeInfo?.label || ''} ممنوحة بقرار الإدارة العليا`,
+      status: 'approved',
+      adminApproved: true,
+      branchApproved: true,
+      approvedBy: 'الإدارة العليا',
+      approvedAt: nowIso,
+      grantedByAdmin: true,
+      createdAt: nowIso,
+      updatedAt: nowIso
+    };
+
+    // تحديث رصيد بدل الراحة إذا كانت الإجازة بدل راحة
+    const updatedEmps = (state.employees || []).map((empItem) => {
+      if (String(empItem.id) === String(targetEmp.id) || (targetEmp.code && String(empItem.code) === String(targetEmp.code))) {
+        if (grantLeaveType === 'comp_off') {
+          const newComp = Math.max(0, currentCompOff - parsedDays);
+          return {
+            ...empItem,
+            compOffBalance: newComp,
+            updatedAt: nowIso
+          };
+        }
+      }
+      return empItem;
+    });
+
+    // إشعار رسمي للموظف
+    const newNotification = {
+      id: `notif_leave_grant_${Date.now()}`,
+      employeeId: targetEmp.id,
+      title: '🏖️ تم منحك إجازة رسمية من الإدارة العليا',
+      message: `قامت الإدارة العليا باعتماد ومنحك إجازة (${leaveTypeInfo?.label || ''}) للفترة من ${grantStartDate} إلى ${effectiveEnd} (${parsedDays} يوم).`,
+      type: 'leave_approved',
+      createdAt: nowIso,
+      read: false
+    };
+
+    const updatedRequests = [newLeaveReq, ...(state.requests || [])];
+    const updatedLeaveRequests = [newLeaveReq, ...(state.leaveRequests || [])];
+    const updatedNotifications = [newNotification, ...(state.notifications || [])];
+
+    const updatedState = normalizeState({
+      ...state,
+      employees: updatedEmps,
+      requests: updatedRequests,
+      leaveRequests: updatedLeaveRequests,
+      notifications: updatedNotifications
+    });
+
+    // ⚡ إغلاق فوري وتحديث تفاؤلي
+    setShowGrantLeaveModal(false);
+    setIsSubmittingGrant(false);
+    if (setState) setState(updatedState);
+    saveStateLocally(updatedState).catch(() => {});
+    broadcastStateChange(updatedState);
+
+    if (showToast) {
+      showToast(`✅ تم منح واعتماد إجازة (${leaveTypeInfo?.label || ''}) للموظف (${getEmpDisplayName(targetEmp)}) بنجاح!`, 'success');
+    }
+
+    // مزامنة السيرفر في الخلفية
+    (async () => {
+      try {
+        await apiSubmitRequestAtomic(newLeaveReq);
+      } catch (atomicErr) {
+        console.warn('[GrantLeave] Fallback to saveState:', atomicErr);
+      }
+      if (saveState) {
+        saveState(updatedState, { entityType: 'requests' }).catch(err => {
+          console.error('[GrantLeave] SaveState error:', err);
+        });
+      }
+    })();
+  };
+
   const employees = state.employees || [];
   const branches = state.branches || [];
 
@@ -367,7 +565,30 @@ export default function LeavesTrackingModule({
           </p>
         </div>
 
-        <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
+        <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap', alignItems: 'center' }}>
+          <button
+            type="button"
+            className="btn btn-primary"
+            onClick={() => handleOpenGrantLeaveModal()}
+            style={{
+              background: 'linear-gradient(135deg, #0d9488, #0f766e)',
+              color: '#ffffff',
+              fontWeight: 800,
+              fontSize: '13px',
+              padding: '7px 18px',
+              borderRadius: '10px',
+              border: 'none',
+              display: 'flex',
+              alignItems: 'center',
+              gap: '6px',
+              boxShadow: '0 4px 12px rgba(13, 148, 136, 0.25)',
+              cursor: 'pointer'
+            }}
+          >
+            <span style={{ fontSize: '15px' }}>➕</span>
+            <span>منح إجازة لموظف (الإدارة)</span>
+          </button>
+
           <button
             type="button"
             className="btn btn-ghost"
@@ -930,13 +1151,34 @@ export default function LeavesTrackingModule({
                       )}
                     </td>
                     <td>
-                      <button
-                        className="btn btn-start"
-                        style={{ padding: '4px 12px', fontSize: '12.5px' }}
-                        onClick={() => setSelectedEmpModal(emp)}
-                      >
-                        👁️ عرض كشف إجازات الموظف
-                      </button>
+                      <div style={{ display: 'flex', gap: '6px', alignItems: 'center' }}>
+                        <button
+                          className="btn btn-start"
+                          style={{ padding: '4px 12px', fontSize: '12px', whiteSpace: 'nowrap' }}
+                          onClick={() => setSelectedEmpModal(emp)}
+                        >
+                          👁️ عرض كشف إجازات الموظف
+                        </button>
+                        <button
+                          type="button"
+                          className="btn btn-ghost"
+                          title={`منح إجازة رسمية للموظف (${getEmpDisplayName(emp)})`}
+                          style={{
+                            padding: '4px 10px',
+                            fontSize: '12px',
+                            fontWeight: 800,
+                            color: '#0d9488',
+                            border: '1.5px solid #0d9488',
+                            borderRadius: '8px',
+                            background: 'rgba(13, 148, 136, 0.08)',
+                            cursor: 'pointer',
+                            whiteSpace: 'nowrap'
+                          }}
+                          onClick={() => handleOpenGrantLeaveModal(emp)}
+                        >
+                          ➕ منح إجازة
+                        </button>
+                      </div>
                     </td>
                   </tr>
                 );
@@ -967,7 +1209,29 @@ export default function LeavesTrackingModule({
                     {selectedEmpModal.nickname && selectedEmpModal.nickname.trim() !== selectedEmpModal.name?.trim() && ` | الاسم الرسمي: ${selectedEmpModal.name}`}
                   </span>
                 </div>
-                <button className="btn btn-ghost" onClick={() => setSelectedEmpModal(null)}>✕ إغلاق</button>
+                <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
+                  <button
+                    type="button"
+                    className="btn btn-primary"
+                    style={{
+                      padding: '6px 14px',
+                      fontSize: '12.5px',
+                      fontWeight: 800,
+                      background: 'linear-gradient(135deg, #0d9488, #0f766e)',
+                      color: '#fff',
+                      border: 'none',
+                      borderRadius: '8px',
+                      cursor: 'pointer',
+                      display: 'inline-flex',
+                      alignItems: 'center',
+                      gap: '4px'
+                    }}
+                    onClick={() => handleOpenGrantLeaveModal(selectedEmpModal)}
+                  >
+                    ➕ منح إجازة لهذا الموظف
+                  </button>
+                  <button className="btn btn-ghost" onClick={() => setSelectedEmpModal(null)}>✕ إغلاق</button>
+                </div>
               </div>
 
               {/* ── بطاقات ملخص أرصدة الموظف (السنوي وبدل الراحة) ── */}
@@ -1148,6 +1412,282 @@ export default function LeavesTrackingModule({
           </div>
         </div>
       )}
+
+      {/* ── نافذة منح إجازة رسمية للموظف من قبل الإدارة العليا ── */}
+      {showGrantLeaveModal && (() => {
+        const selectedEmp = (state.employees || []).find(e => String(e.id) === String(grantEmpId));
+        const empStats = selectedEmp ? calculateEmployeeLeaveStats(selectedEmp, state) : null;
+        const compOffBal = parseFloat(selectedEmp?.compOffBalance || 0) || 0;
+        const currentLeaveTypeObj = LEAVE_TYPES.find(t => t.key === grantLeaveType);
+
+        return (
+          <div className="modal-backdrop" style={{ zIndex: 1200 }}>
+            <div className="modal-content card" style={{ maxWidth: '640px', width: '95%', padding: '26px', borderRadius: '16px', maxHeight: '92vh', overflowY: 'auto', boxShadow: '0 25px 60px -15px rgba(15, 23, 42, 0.4)' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '18px', borderBottom: '1px solid var(--border)', paddingBottom: '12px' }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                  <div style={{
+                    width: '42px',
+                    height: '42px',
+                    borderRadius: '10px',
+                    background: 'linear-gradient(135deg, #0d9488, #0f766e)',
+                    color: '#fff',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    fontSize: '22px',
+                    boxShadow: '0 4px 10px rgba(13, 148, 136, 0.25)'
+                  }}>
+                    🏖️
+                  </div>
+                  <div>
+                    <h3 style={{ margin: 0, color: 'var(--text)', fontSize: '17px', fontWeight: 800 }}>
+                      منح وتسجيل إجازة لموظف (بقرار الإدارة العليا)
+                    </h3>
+                    <span style={{ fontSize: '12px', color: 'var(--muted)' }}>
+                      اعتماد وتسجيل الإجازة مباشرة في كشف حساب الموظف وتحديث الأرصدة تلقائياً
+                    </span>
+                  </div>
+                </div>
+                <button className="btn btn-ghost" onClick={() => setShowGrantLeaveModal(false)} style={{ padding: '4px 10px', fontSize: '16px' }}>✕</button>
+              </div>
+
+              <form onSubmit={handleSaveGrantLeave}>
+                {/* 1. اختيار الموظف */}
+                <div style={{ marginBottom: '16px' }}>
+                  <label style={{ display: 'block', marginBottom: '6px', fontWeight: 800, fontSize: '13px', color: 'var(--text)' }}>
+                    👤 اختيار الموظف المستهدف:
+                  </label>
+                  <select
+                    value={grantEmpId}
+                    onChange={(e) => setGrantEmpId(e.target.value)}
+                    style={{
+                      width: '100%',
+                      padding: '10px 14px',
+                      borderRadius: '8px',
+                      border: '1.5px solid var(--primary, #0d9488)',
+                      fontSize: '13.5px',
+                      fontWeight: 700,
+                      background: 'var(--surface, #fff)',
+                      color: 'var(--text)'
+                    }}
+                    required
+                  >
+                    <option value="">-- اختر الموظف من القائمة --</option>
+                    {(state.employees || []).filter(isEmployeeActive).map(emp => {
+                      const b = (state.branches || []).find(br => String(br.id) === String(emp.branchId));
+                      return (
+                        <option key={emp.id} value={emp.id}>
+                          {emp.code ? `[كود ${emp.code}] ` : ''}{getEmpDisplayName(emp)} ({b ? b.name : 'المركز الرئيسي'})
+                        </option>
+                      );
+                    })}
+                  </select>
+                </div>
+
+                {/* 2. بطاقة رصيد الموظف المختار التفاعلية */}
+                {selectedEmp && (
+                  <div style={{
+                    background: 'var(--surface-muted, #f8fafc)',
+                    border: '1px solid var(--border)',
+                    borderRadius: '10px',
+                    padding: '12px 16px',
+                    marginBottom: '16px',
+                    display: 'flex',
+                    justifyContent: 'space-between',
+                    alignItems: 'center',
+                    flexWrap: 'wrap',
+                    gap: '10px'
+                  }}>
+                    <div>
+                      <div style={{ fontSize: '11.5px', color: 'var(--muted)', fontWeight: 600 }}>الموظف المحدد:</div>
+                      <div style={{ fontSize: '13.5px', fontWeight: 800, color: 'var(--text)' }}>
+                        {getEmpDisplayName(selectedEmp)} {selectedEmp.jobTitle && <span style={{ fontSize: '11.5px', color: 'var(--muted)', fontWeight: 600 }}>({selectedEmp.jobTitle})</span>}
+                      </div>
+                    </div>
+                    <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
+                      <span style={{
+                        color: empStats?.remainingAnnualDays > 0 ? '#15803d' : '#b91c1c',
+                        background: empStats?.remainingAnnualDays > 0 ? '#f0fdf4' : '#fef2f2',
+                        border: empStats?.remainingAnnualDays > 0 ? '1px solid #bbf7d0' : '1px solid #fecaca',
+                        padding: '3px 10px',
+                        borderRadius: '6px',
+                        fontSize: '12px',
+                        fontWeight: 800
+                      }}>
+                        🏖️ الرصيد السنوي: {empStats?.remainingAnnualDays ?? 0} يوم متبقي
+                      </span>
+                      <span style={{
+                        color: compOffBal > 0 ? '#7e22ce' : '#64748b',
+                        background: compOffBal > 0 ? '#faf5ff' : 'var(--surface, #fff)',
+                        border: compOffBal > 0 ? '1px solid #e9d5ff' : '1px solid var(--border)',
+                        padding: '3px 10px',
+                        borderRadius: '6px',
+                        fontSize: '12px',
+                        fontWeight: 800
+                      }}>
+                        🛋️ بدل الراحة: {compOffBal} يوم متاح
+                      </span>
+                    </div>
+                  </div>
+                )}
+
+                {/* 3. نوع الإجازة */}
+                <div style={{ marginBottom: '16px' }}>
+                  <label style={{ display: 'block', marginBottom: '6px', fontWeight: 800, fontSize: '13px', color: 'var(--text)' }}>
+                    🏷️ نوع الإجازة الممنوحة:
+                  </label>
+                  <select
+                    value={grantLeaveType}
+                    onChange={(e) => setGrantLeaveType(e.target.value)}
+                    style={{
+                      width: '100%',
+                      padding: '10px 14px',
+                      borderRadius: '8px',
+                      border: '1.5px solid var(--border)',
+                      fontSize: '13.5px',
+                      fontWeight: 800,
+                      background: 'var(--surface, #fff)',
+                      color: 'var(--text)'
+                    }}
+                  >
+                    {LEAVE_TYPES.map(t => (
+                      <option key={t.key} value={t.key}>
+                        {t.label} ⬅️ [{t.deduction}]
+                      </option>
+                    ))}
+                  </select>
+
+                  <div style={{
+                    marginTop: '6px',
+                    padding: '8px 12px',
+                    borderRadius: '8px',
+                    fontSize: '12px',
+                    fontWeight: 700,
+                    background: grantLeaveType === 'comp_off' ? '#faf5ff' : grantLeaveType === 'unpaid' ? '#fef2f2' : '#f0fdfa',
+                    color: grantLeaveType === 'comp_off' ? '#7e22ce' : grantLeaveType === 'unpaid' ? '#b91c1c' : '#0f766e',
+                    border: grantLeaveType === 'comp_off' ? '1px solid #e9d5ff' : grantLeaveType === 'unpaid' ? '1px solid #fecaca' : '1px solid #ccfbf1'
+                  }}>
+                    💡 <strong>الأثر المالي والتنظيمي:</strong> {currentLeaveTypeObj?.deduction}
+                    {grantLeaveType === 'comp_off' && (
+                      <div style={{ marginTop: '3px', fontSize: '11px' }}>
+                        سيتم خصم عدد الأيام تلقائياً من رصيد بدل الراحة للموظف فور اعتماد الإجازة.
+                      </div>
+                    )}
+                    {grantLeaveType === 'annual' && (
+                      <div style={{ marginTop: '3px', fontSize: '11px' }}>
+                        تعتبر إجازة اعتيادية مدفوعة الأجر وتخصم من رصيد الإجازات السنوي للموظف (21 يوماً).
+                      </div>
+                    )}
+                  </div>
+                </div>
+
+                {/* 4. التواريخ وعدد الأيام */}
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(170px, 1fr))', gap: '12px', marginBottom: '16px' }}>
+                  <div>
+                    <label style={{ display: 'block', marginBottom: '5px', fontWeight: 800, fontSize: '12.5px', color: 'var(--text)' }}>
+                      📅 من تاريخ (البداية):
+                    </label>
+                    <input
+                      type="date"
+                      value={grantStartDate}
+                      onChange={(e) => handleStartDateChange(e.target.value)}
+                      style={{ width: '100%', padding: '8px 12px', borderRadius: '8px', border: '1px solid var(--border)', fontSize: '13px', background: 'var(--surface, #fff)', color: 'var(--text)', boxSizing: 'border-box' }}
+                      required
+                    />
+                  </div>
+
+                  <div>
+                    <label style={{ display: 'block', marginBottom: '5px', fontWeight: 800, fontSize: '12.5px', color: 'var(--text)' }}>
+                      📅 إلى تاريخ (النهاية):
+                    </label>
+                    <input
+                      type="date"
+                      value={grantEndDate}
+                      min={grantStartDate}
+                      onChange={(e) => handleEndDateChange(e.target.value)}
+                      style={{ width: '100%', padding: '8px 12px', borderRadius: '8px', border: '1px solid var(--border)', fontSize: '13px', background: 'var(--surface, #fff)', color: 'var(--text)', boxSizing: 'border-box' }}
+                      required
+                    />
+                  </div>
+
+                  <div>
+                    <label style={{ display: 'block', marginBottom: '5px', fontWeight: 800, fontSize: '12.5px', color: 'var(--text)' }}>
+                      ⏱️ عدد أيام الإجازة:
+                    </label>
+                    <input
+                      type="number"
+                      min="0.5"
+                      step="0.5"
+                      value={grantDaysCount}
+                      onChange={(e) => setGrantDaysCount(e.target.value)}
+                      style={{
+                        width: '100%',
+                        padding: '8px 12px',
+                        borderRadius: '8px',
+                        border: '1.5px solid var(--primary, #0d9488)',
+                        fontSize: '14px',
+                        fontWeight: 800,
+                        textAlign: 'center',
+                        background: 'var(--surface, #fff)',
+                        color: 'var(--text)',
+                        boxSizing: 'border-box'
+                      }}
+                      required
+                    />
+                  </div>
+                </div>
+
+                {/* 5. سبب الإجازة وملاحظات الإدارة */}
+                <div style={{ marginBottom: '20px' }}>
+                  <label style={{ display: 'block', marginBottom: '5px', fontWeight: 800, fontSize: '12.5px', color: 'var(--text)' }}>
+                    📝 سبب الإجازة / ملاحظات الإدارة العليا:
+                  </label>
+                  <input
+                    type="text"
+                    placeholder="مثال: إجازة اعتيادية سنوية / مكافأة إدارية / ظرف عائلي معتمد"
+                    value={grantReason}
+                    onChange={(e) => setGrantReason(e.target.value)}
+                    style={{ width: '100%', padding: '9px 12px', borderRadius: '8px', border: '1px solid var(--border)', fontSize: '13px', background: 'var(--surface, #fff)', color: 'var(--text)', boxSizing: 'border-box' }}
+                  />
+                </div>
+
+                {/* 6. أزرار الحفظ والإلغاء */}
+                <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '10px', borderTop: '1px solid var(--border)', paddingTop: '16px' }}>
+                  <button
+                    type="button"
+                    className="btn btn-ghost"
+                    onClick={() => setShowGrantLeaveModal(false)}
+                    style={{ padding: '8px 18px', fontSize: '13px' }}
+                  >
+                    إلغاء
+                  </button>
+                  <button
+                    type="submit"
+                    className="btn btn-primary"
+                    disabled={isSubmittingGrant}
+                    style={{
+                      fontWeight: 800,
+                      padding: '9px 24px',
+                      background: 'linear-gradient(135deg, #0d9488, #0f766e)',
+                      color: '#fff',
+                      border: 'none',
+                      borderRadius: '8px',
+                      cursor: isSubmittingGrant ? 'not-allowed' : 'pointer',
+                      display: 'inline-flex',
+                      alignItems: 'center',
+                      gap: '6px',
+                      fontSize: '13px',
+                      boxShadow: '0 4px 12px rgba(13, 148, 136, 0.25)'
+                    }}
+                  >
+                    {isSubmittingGrant ? '⏳ جاري الحفظ والاعتماد...' : '💾 اعتماد ومنح الإجازة فوراً'}
+                  </button>
+                </div>
+              </form>
+            </div>
+          </div>
+        );
+      })()}
 
     </div>
   );

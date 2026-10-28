@@ -20,17 +20,37 @@ export default function PosMultiWindowManager() {
   // إدارة السحب والتحريك (Dragging)
   const [dragState, setDragState] = useState(null); // { windowId, startX, startY, origX, origY }
 
-  // اختصار التبديل بين النوافذ Ctrl + Tab
+  // اختصار التبديل بين النوافذ (Ctrl + Tab / Alt + W / Ctrl + Q / Alt + 1..9 / Alt + الأسهم)
   useEffect(() => {
     const handleGlobalShortcuts = (e) => {
-      if (e.ctrlKey && e.key === 'Tab') {
+      const isCtrlTab = e.ctrlKey && e.key === 'Tab';
+      const isAltW = e.altKey && (e.key === 'w' || e.key === 'W' || e.key === 'ص');
+      const isCtrlQ = e.ctrlKey && (e.key === 'q' || e.key === 'Q' || e.key === 'ض');
+      const isAltArrow = e.altKey && (e.key === 'ArrowRight' || e.key === 'ArrowLeft');
+
+      if (isCtrlTab || isAltW || isCtrlQ || isAltArrow) {
         e.preventDefault();
-        cycleActiveSalesWindow(e.shiftKey ? -1 : 1);
+        e.stopPropagation();
+        if (e.stopImmediatePropagation) e.stopImmediatePropagation();
+        const dir = (e.shiftKey || e.key === 'ArrowLeft') ? -1 : 1;
+        cycleActiveSalesWindow(dir);
+        return;
+      }
+
+      // Alt + 1..9 للتبديل المباشر لرقم الشاشة
+      if (e.altKey && e.key >= '1' && e.key <= '9') {
+        const targetIndex = parseInt(e.key, 10) - 1;
+        if (salesWindows[targetIndex]) {
+          e.preventDefault();
+          e.stopPropagation();
+          if (e.stopImmediatePropagation) e.stopImmediatePropagation();
+          bringWindowToFront(salesWindows[targetIndex].id);
+        }
       }
     };
-    window.addEventListener('keydown', handleGlobalShortcuts);
-    return () => window.removeEventListener('keydown', handleGlobalShortcuts);
-  }, [cycleActiveSalesWindow]);
+    window.addEventListener('keydown', handleGlobalShortcuts, { capture: true });
+    return () => window.removeEventListener('keydown', handleGlobalShortcuts, { capture: true });
+  }, [cycleActiveSalesWindow, bringWindowToFront, salesWindows]);
 
   const handleTitleBarMouseDown = (e, windowId) => {
     // عدم بدء السحب إذا تم النقر على أزرار التحكم (إغلاق، تصغير، تكبير)
@@ -56,9 +76,12 @@ export default function PosMultiWindowManager() {
       const deltaX = e.clientX - dragState.startX;
       const deltaY = e.clientY - dragState.startY;
 
-      // سحب حر 360 درجة في كامل محيط الشاشة بسلاسة مطلقة
-      const newX = Math.max(10, Math.min(window.innerWidth - 120, dragState.origX + deltaX));
-      const newY = Math.max(10, Math.min(window.innerHeight - 60, dragState.origY + deltaY));
+      const currentWin = salesWindows.find((w) => w.id === dragState.windowId);
+      const winW = currentWin?.size?.width || 1000;
+
+      // سحب حر 360 درجة في كامل محيط الشاشة وفوق الشريط الجانبي بسلاسة مطلقة
+      const newX = Math.max(-winW + 120, Math.min(window.innerWidth - 80, dragState.origX + deltaX));
+      const newY = Math.max(0, Math.min(window.innerHeight - 60, dragState.origY + deltaY));
 
       updateWindowPosition(dragState.windowId, { x: newX, y: newY });
     };
@@ -75,10 +98,10 @@ export default function PosMultiWindowManager() {
     };
   }, [dragState, updateWindowPosition]);
 
-  // إدارة تغيير الأبعاد (Resizing)
+  // إدارة تغيير الأبعاد بثمانية اتجاهات من كافة الجوانب والأطراف (8-Direction Resizing)
   const [resizeState, setResizeState] = useState(null);
 
-  const handleResizerMouseDown = (e, windowId) => {
+  const handleResizerMouseDown = (e, windowId, dir = 'se') => {
     e.stopPropagation();
     bringWindowToFront(windowId);
     const win = salesWindows.find((w) => w.id === windowId);
@@ -86,11 +109,13 @@ export default function PosMultiWindowManager() {
 
     setResizeState({
       windowId,
+      dir,
       startX: e.clientX,
       startY: e.clientY,
       origW: win.size.width,
       origH: win.size.height,
-      origX: win.position.x
+      origX: win.position.x,
+      origY: win.position.y
     });
   };
 
@@ -101,10 +126,37 @@ export default function PosMultiWindowManager() {
       const deltaX = e.clientX - resizeState.startX;
       const deltaY = e.clientY - resizeState.startY;
 
-      const newW = Math.max(750, Math.min(window.innerWidth - 40, resizeState.origW + deltaX));
-      const newH = Math.max(480, Math.min(window.innerHeight - 80, resizeState.origH + deltaY));
+      let newW = resizeState.origW;
+      let newH = resizeState.origH;
+      let newX = resizeState.origX;
+      let newY = resizeState.origY;
+
+      // المحور الأفقي: التمدد لليمين أو لليسار
+      if (resizeState.dir.includes('e')) {
+        newW = Math.max(800, Math.min(window.innerWidth - 30, resizeState.origW + deltaX));
+      } else if (resizeState.dir.includes('w')) {
+        const potentialW = resizeState.origW - deltaX;
+        if (potentialW >= 800 && resizeState.origX + deltaX >= 10) {
+          newW = potentialW;
+          newX = resizeState.origX + deltaX;
+        }
+      }
+
+      // المحور الرأسي: التمدد لأسفل أو لأعلى
+      if (resizeState.dir.includes('s')) {
+        newH = Math.max(520, Math.min(window.innerHeight - 60, resizeState.origH + deltaY));
+      } else if (resizeState.dir.includes('n')) {
+        const potentialH = resizeState.origH - deltaY;
+        if (potentialH >= 520 && resizeState.origY + deltaY >= 10) {
+          newH = potentialH;
+          newY = resizeState.origY + deltaY;
+        }
+      }
 
       updateWindowSize(resizeState.windowId, { width: newW, height: newH });
+      if (newX !== resizeState.origX || newY !== resizeState.origY) {
+        updateWindowPosition(resizeState.windowId, { x: newX, y: newY });
+      }
     };
 
     const handleMouseUp = () => {
@@ -117,7 +169,7 @@ export default function PosMultiWindowManager() {
       window.removeEventListener('mousemove', handleMouseMove);
       window.removeEventListener('mouseup', handleMouseUp);
     };
-  }, [resizeState, updateWindowSize]);
+  }, [resizeState, updateWindowSize, updateWindowPosition]);
 
   const handleCloseClick = (win) => {
     if (win.cart.length > 0) {
@@ -135,7 +187,10 @@ export default function PosMultiWindowManager() {
           <div
             style={{
               position: 'absolute',
-              inset: 0,
+              top: 0,
+              bottom: 0,
+              left: 0,
+              right: '340px',
               display: 'flex',
               flexDirection: 'column',
               alignItems: 'center',
@@ -143,7 +198,8 @@ export default function PosMultiWindowManager() {
               gap: '16px',
               direction: 'rtl',
               zIndex: 5,
-              padding: '20px'
+              padding: '20px',
+              pointerEvents: 'auto'
             }}
           >
             <div
@@ -330,17 +386,54 @@ export default function PosMultiWindowManager() {
                 <PosSalesWindow windowId={win.id} />
               </div>
 
-              {/* مقبض تغيير الحجم (يظهر فقط إذا لم تكن مكبرة بالكامل) */}
+              {/* مقابض تغيير الأبعاد بثمانية اتجاهات من كافة أطراف وجوانب النافذة */}
               {!win.isMaximized && (
-                <div
-                  className="pos-window-resizer"
-                  onMouseDown={(e) => handleResizerMouseDown(e, win.id)}
-                  title="سحب لتغيير أبعاد النافذة"
-                >
-                  <svg width="14" height="14" viewBox="0 0 14 14" fill="none" style={{ opacity: 0.4 }}>
-                    <path d="M12 2L2 12M12 7L7 12M12 12H12.01" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
-                  </svg>
-                </div>
+                <>
+                  <div
+                    className="pos-resize-handle pos-resize-n"
+                    onMouseDown={(e) => handleResizerMouseDown(e, win.id, 'n')}
+                    title="سحب لتغيير الارتفاع لأعلى"
+                  />
+                  <div
+                    className="pos-resize-handle pos-resize-s"
+                    onMouseDown={(e) => handleResizerMouseDown(e, win.id, 's')}
+                    title="سحب لتغيير الارتفاع لأسفل"
+                  />
+                  <div
+                    className="pos-resize-handle pos-resize-w"
+                    onMouseDown={(e) => handleResizerMouseDown(e, win.id, 'w')}
+                    title="سحب لتغيير العرض يساراً"
+                  />
+                  <div
+                    className="pos-resize-handle pos-resize-e"
+                    onMouseDown={(e) => handleResizerMouseDown(e, win.id, 'e')}
+                    title="سحب لتغيير العرض يميناً"
+                  />
+                  <div
+                    className="pos-resize-handle pos-resize-nw"
+                    onMouseDown={(e) => handleResizerMouseDown(e, win.id, 'nw')}
+                    title="سحب قطري أعلى-يسار"
+                  />
+                  <div
+                    className="pos-resize-handle pos-resize-ne"
+                    onMouseDown={(e) => handleResizerMouseDown(e, win.id, 'ne')}
+                    title="سحب قطري أعلى-يمين"
+                  />
+                  <div
+                    className="pos-resize-handle pos-resize-sw"
+                    onMouseDown={(e) => handleResizerMouseDown(e, win.id, 'sw')}
+                    title="سحب قطري أسفل-يسار"
+                  />
+                  <div
+                    className="pos-resize-handle pos-resize-se"
+                    onMouseDown={(e) => handleResizerMouseDown(e, win.id, 'se')}
+                    title="سحب لتغيير الأبعاد بحرية"
+                  >
+                    <svg width="12" height="12" viewBox="0 0 14 14" fill="none" style={{ opacity: 0.45, position: 'absolute', bottom: 2, right: 2 }}>
+                      <path d="M12 2L2 12M12 7L7 12M12 12H12.01" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
+                    </svg>
+                  </div>
+                </>
               )}
             </div>
           );

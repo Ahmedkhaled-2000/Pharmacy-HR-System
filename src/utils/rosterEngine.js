@@ -1,4 +1,5 @@
 import { arabicWeekday } from './formatters.js';
+export { arabicWeekday };
 import { getRealTodayStr } from './timeEngine.js';
 import { getActivePayrollMonth, getCycleDateRange, extractPayrollSettings } from './periodEngine.js';
 import { getActiveSecondment } from './secondmentEngine.js';
@@ -87,6 +88,25 @@ export function getDayScheduleFromMap(schedule, jsDayIndex, dateStr = null) {
   return null;
 }
 
+/**
+ * حساب دقيق وصارم لساعات الوردية بين موعدي البدء والانتهاء (Authoritative Shift Duration)
+ * يستوعب الورديات الليلية العابرة لمنتصف الليل ويحمي ضد البصمات الصفرية والتضخم
+ */
+export function calcShiftDurationHours(start, end) {
+  if (!start || !end) return 0;
+  const sStr = String(start).trim().slice(0, 5);
+  const eStr = String(end).trim().slice(0, 5);
+  const [sH, sM] = sStr.split(':').map(Number);
+  const [eH, eM] = eStr.split(':').map(Number);
+  if (isNaN(sH) || isNaN(eH)) return 0;
+  const sMins = sH * 60 + (sM || 0);
+  const eMins = eH * 60 + (eM || 0);
+  if (sMins === eMins) return 0;
+  let diff = eMins - sMins;
+  if (diff < 0) diff += 24 * 60;
+  return Math.round((diff / 60) * 10) / 10;
+}
+
 export function getDayShiftsList(item, defaultBranchId = null) {
   if (!item || typeof item !== 'object') return [];
 
@@ -104,7 +124,7 @@ export function getDayShiftsList(item, defaultBranchId = null) {
           branchName: s.branchName || item.branchName || '',
           start: s.start || '08:00',
           end: s.end || '16:00',
-          hours: s.hours !== undefined ? Number(s.hours) : 8,
+          hours: calcShiftDurationHours(s.start, s.end) || (s.hours !== undefined ? Number(s.hours) : 8),
           type: s.type || 'shift',
           isOff: false,
           isOtherBranchShift: true
@@ -124,7 +144,7 @@ export function getDayShiftsList(item, defaultBranchId = null) {
         branchName: s.branchName || item.branchName || '',
         start: s.start || '08:00',
         end: s.end || '16:00',
-        hours: s.hours !== undefined ? Number(s.hours) : 8,
+        hours: calcShiftDurationHours(s.start, s.end) || (s.hours !== undefined ? Number(s.hours) : 8),
         type: s.type || 'shift',
         isOff: false
       }));
@@ -137,7 +157,7 @@ export function getDayShiftsList(item, defaultBranchId = null) {
         branchName: item.branchName || '',
         start: item.start,
         end: item.end,
-        hours: item.hours !== undefined ? Number(item.hours) : 8,
+        hours: calcShiftDurationHours(item.start, item.end) || (item.hours !== undefined ? Number(item.hours) : 8),
         type: item.type || 'shift',
         isOff: false
       });
@@ -151,7 +171,7 @@ export function getDayShiftsList(item, defaultBranchId = null) {
         branchName: item.secondShift.branchName || item.branchName || '',
         start: item.secondShift.start,
         end: item.secondShift.end,
-        hours: item.secondShift.hours !== undefined ? Number(item.secondShift.hours) : 6,
+        hours: calcShiftDurationHours(item.secondShift.start, item.secondShift.end) || (item.secondShift.hours !== undefined ? Number(item.secondShift.hours) : 6),
         type: item.secondShift.type || 'shift',
         isOff: false
       });
@@ -162,6 +182,7 @@ export function getDayShiftsList(item, defaultBranchId = null) {
   if (Array.isArray(item.otherBranchShifts) && item.otherBranchShifts.length > 0) {
     item.otherBranchShifts.forEach((obs) => {
       if (obs && typeof obs === 'object' && !obs.isOff && obs.type !== 'off' && obs.start && obs.end) {
+        if (obs.isResigned || obs.resigned || obs.status === 'resigned') return;
         const exists = rawShifts.some(rs =>
           rs.start === obs.start &&
           rs.end === obs.end &&
@@ -175,7 +196,7 @@ export function getDayShiftsList(item, defaultBranchId = null) {
             branchName: obs.branchName || '',
             start: obs.start,
             end: obs.end,
-            hours: obs.hours !== undefined ? Number(obs.hours) : 8,
+            hours: calcShiftDurationHours(obs.start, obs.end) || (obs.hours !== undefined ? Number(obs.hours) : 8),
             type: obs.type || 'shift',
             isOff: false,
             isOtherBranchShift: true
@@ -188,24 +209,26 @@ export function getDayShiftsList(item, defaultBranchId = null) {
   // دعم الوردية الثانية للفرع الآخر (الموظف متعدد الفروع)
   if (item.otherBranchSecondShift && typeof item.otherBranchSecondShift === 'object' && !item.otherBranchSecondShift.isOff && item.otherBranchSecondShift.type !== 'off' && item.otherBranchSecondShift.start && item.otherBranchSecondShift.end) {
     const obs = item.otherBranchSecondShift;
-    const exists = rawShifts.some(rs =>
-      rs.start === obs.start &&
-      rs.end === obs.end &&
-      String(rs.branchId || '').trim() === String(obs.branchId || '').trim()
-    );
-    if (!exists) {
-      rawShifts.push({
-        id: obs.id || `shift_${rawShifts.length + 1}`,
-        shiftIndex: rawShifts.length + 1,
-        branchId: String(obs.branchId || '').trim(),
-        branchName: obs.branchName || obs.otherBranchName || '',
-        start: obs.start,
-        end: obs.end,
-        hours: obs.hours !== undefined ? Number(obs.hours) : 6,
-        type: obs.type || 'shift',
-        isOff: false,
-        isOtherBranchShift: true
-      });
+    if (!obs.isResigned && !obs.resigned && obs.status !== 'resigned') {
+      const exists = rawShifts.some(rs =>
+        rs.start === obs.start &&
+        rs.end === obs.end &&
+        String(rs.branchId || '').trim() === String(obs.branchId || '').trim()
+      );
+      if (!exists) {
+        rawShifts.push({
+          id: obs.id || `shift_${rawShifts.length + 1}`,
+          shiftIndex: rawShifts.length + 1,
+          branchId: String(obs.branchId || '').trim(),
+          branchName: obs.branchName || obs.otherBranchName || '',
+          start: obs.start,
+          end: obs.end,
+          hours: calcShiftDurationHours(obs.start, obs.end) || (obs.hours !== undefined ? Number(obs.hours) : 6),
+          type: obs.type || 'shift',
+          isOff: false,
+          isOtherBranchShift: true
+        });
+      }
     }
   }
 
@@ -225,7 +248,7 @@ export function getDayShiftsList(item, defaultBranchId = null) {
         branchName: obs.branchName || obs.otherBranchName || '',
         start: obs.start,
         end: obs.end,
-        hours: obs.hours !== undefined ? Number(obs.hours) : 6,
+        hours: calcShiftDurationHours(obs.start, obs.end) || (obs.hours !== undefined ? Number(obs.hours) : 6),
         type: obs.type || 'shift',
         isOff: false,
         isOtherBranchShift: true
@@ -242,6 +265,21 @@ function normalizeScheduleItem(item, jsDayIndex) {
   }
   const isOff = item.type === 'off' || item.isOff === true;
   const shifts = isOff ? [] : getDayShiftsList(item);
+  const primaryShift = shifts[0] || null;
+  const start = isOff ? '' : (primaryShift ? primaryShift.start : (item.start || ''));
+  const end = isOff ? '' : (primaryShift ? primaryShift.end : (item.end || ''));
+
+  let computedHours = 0;
+  if (!isOff) {
+    if (shifts.length > 0) {
+      computedHours = Math.round(shifts.reduce((acc, s) => acc + (s.hours !== undefined ? Number(s.hours) : calcShiftDurationHours(s.start, s.end)), 0) * 10) / 10;
+    } else if (start && end) {
+      computedHours = calcShiftDurationHours(start, end);
+    } else {
+      computedHours = item.hours !== undefined ? Number(item.hours) : 8;
+    }
+  }
+
   const hasSecondShift = Boolean(shifts.length > 1 || (item.hasSecondShift && item.secondShift));
   const secondShift = shifts.length > 1 ? {
     ...shifts[1],
@@ -255,20 +293,18 @@ function normalizeScheduleItem(item, jsDayIndex) {
     isOff: item.secondShift.isOff || false,
     start: item.secondShift.start || '',
     end: item.secondShift.end || '',
-    hours: item.secondShift.hours !== undefined ? item.secondShift.hours : (item.secondShift.start && item.secondShift.end ? 8 : 0),
+    hours: (item.secondShift.start && item.secondShift.end) ? calcShiftDurationHours(item.secondShift.start, item.secondShift.end) : (item.secondShift.hours !== undefined ? Number(item.secondShift.hours) : 0),
     branchId: item.secondShift.branchId || null,
     branchName: item.secondShift.branchName || null
   } : null);
-
-  const primaryShift = shifts[0] || null;
 
   return {
     ...item,
     type: isOff ? 'off' : (item.type || 'shift'),
     isOff,
-    start: isOff ? '' : (primaryShift ? primaryShift.start : (item.start || '')),
-    end: isOff ? '' : (primaryShift ? primaryShift.end : (item.end || '')),
-    hours: item.hours !== undefined ? item.hours : (isOff ? 0 : (item.start && item.end ? 8 : 0)),
+    start,
+    end,
+    hours: computedHours,
     branchId: primaryShift ? primaryShift.branchId : (item.branchId || null),
     branchName: primaryShift ? primaryShift.branchName : (item.branchName || null),
     hasSecondShift,
@@ -295,7 +331,7 @@ export function findEmployeeRoster(empId, monthOrDate, state, targetBranchId = n
   }
 
   // 🌟 توحيد المصدر: استخدام getResolvedEmployeeRoster كمرجع أعلى وأوحد في كافة الشاشات
-  const resolved = getResolvedEmployeeRoster(empId, targetBranchId, cycleMonth || dateStr, state);
+  const resolved = getResolvedEmployeeRoster(empId, targetBranchId, dateStr || cycleMonth, state);
   if (resolved && resolved.schedule) {
     return resolved;
   }
@@ -556,14 +592,33 @@ export function getEmployeeDaySchedule(empId, dateStr, state, targetBranchId = n
   }
 
   // 0. فحص طلبات تعديل الشيفت أو الجداول الشهرية المعتمدة لهذا الموظف والتاريخ
+  const activeRosterForAdj = findEmployeeRoster(empId, dateStr, state, targetBranchId);
+  const rosterTimeForAdj = activeRosterForAdj ? new Date(activeRosterForAdj.approvedAt || activeRosterForAdj.updatedAt || activeRosterForAdj.createdAt || 0).getTime() : 0;
+  const hasExplicitDateInRoster = Boolean(activeRosterForAdj && activeRosterForAdj.schedule && activeRosterForAdj.schedule[dateStr]);
+
   const approvedShiftAdj = (state?.requests || []).find(r => {
     if (!r) return false;
+    // 🛡️ استبعاد أي طلب تم إلغاؤه أو تجاوزه إدارياً (Superseded) أو رفضه
+    if (r.supersededByAdmin || r.status === 'superseded' || r.status === 'cancelled' || r.status === 'rejected') return false;
+
     const isAdj = r.type === 'shift_adjustment' || r.type === 'roster_edit' || r.type === 'roster_update' || r.type === 'roster_edit_request' || r.type === 'schedule_edit';
     if (!isAdj) return false;
     const isApproved = r.status === 'approved' || r.adminApproved === true || (r.branchApproved && r.isDirectToAdmin);
     if (!isApproved) return false;
     const isEmpMatch = String(r.employeeId) === empIdStr || (empCodeStr && String(r.employeeCode) === empCodeStr);
     if (!isEmpMatch) return false;
+
+    // 🛡️ فحص الفرع الحاسم: إذا كان الطلب ينتمي لفرع مختلف عن الفرع المطلوب أو المعين به الموظف، نتجاهله
+    const effectiveBId = targetBranchId || emp?.branchId;
+    if (r.branchId && effectiveBId && String(r.branchId).trim() !== String(effectiveBId).trim()) {
+      return false;
+    }
+
+    // 🛡️ مقترحات الجداول الشهرية الشاملة القديمة لا تلغي الجدول المعتمد الرسمي المحفوظ في rosters
+    const isWholeRosterProposal = r.type === 'roster_update' || r.type === 'roster_edit' || r.type === 'roster_edit_request';
+    if (isWholeRosterProposal && activeRosterForAdj && (activeRosterForAdj.status === 'approved' || activeRosterForAdj.adminApproved)) {
+      return false;
+    }
 
     if (r.date === dateStr) return true;
     if (Array.isArray(r.dates) && r.dates.includes(dateStr)) return true;
@@ -574,47 +629,57 @@ export function getEmployeeDaySchedule(empId, dateStr, state, targetBranchId = n
   });
 
   if (approvedShiftAdj) {
-    const schedItem = (approvedShiftAdj.schedule && approvedShiftAdj.schedule[dateStr]) ||
-                      (approvedShiftAdj.newSchedule && approvedShiftAdj.newSchedule[dateStr]);
-    if (schedItem) {
-      const isOff = schedItem.type === 'off' || schedItem.isOff === true;
-      return {
-        ...schedItem,
-        type: isOff ? 'off' : 'shift',
-        isOff,
-        start: isOff ? '' : (schedItem.start || '08:00'),
-        end: isOff ? '' : (schedItem.end || '16:00'),
-        hours: isOff ? 0 : (schedItem.hours !== undefined ? schedItem.hours : 8),
-        isAdjusted: true,
-        adjustmentRequestId: approvedShiftAdj.id,
-        adjustmentLabel: isOff ? '🛋️ راحة معتمدة بطلب رسمي' : '🔄 وردية معتمدة بطلب رسمي'
-      };
-    }
+    const adjTime = new Date(approvedShiftAdj.approvedAt || approvedShiftAdj.updatedAt || approvedShiftAdj.createdAt || 0).getTime();
+    // 🛡️ إذا كان الروستر المعتمد أحدث من طلب تعديل الشيفت وله إعداد مخصص لهذا اليوم، فالروستر الأحدث يفوز
+    if (rosterTimeForAdj > adjTime && hasExplicitDateInRoster) {
+      // الروستر الأحدث المعتمد يلغي الطلب القديم
+    } else {
+      const schedItem = (approvedShiftAdj.schedule && approvedShiftAdj.schedule[dateStr]) ||
+                        (approvedShiftAdj.newSchedule && approvedShiftAdj.newSchedule[dateStr]);
+      if (schedItem) {
+        const isOff = schedItem.type === 'off' || schedItem.isOff === true;
+        const adjStart = isOff ? '' : (schedItem.start || '08:00');
+        const adjEnd = isOff ? '' : (schedItem.end || '16:00');
+        const adjHours = isOff ? 0 : (calcShiftDurationHours(adjStart, adjEnd) || (schedItem.hours !== undefined ? Number(schedItem.hours) : 8));
+        return {
+          ...schedItem,
+          type: isOff ? 'off' : 'shift',
+          isOff,
+          start: adjStart,
+          end: adjEnd,
+          hours: adjHours,
+          isAdjusted: true,
+          adjustmentRequestId: approvedShiftAdj.id,
+          adjustmentLabel: isOff ? '🛋️ راحة معتمدة بطلب رسمي' : '🔄 وردية معتمدة بطلب رسمي'
+        };
+      }
 
-    if (approvedShiftAdj.actionType === 'set_rest_day' || approvedShiftAdj.replacementRestDate === dateStr) {
-      return {
-        type: 'off',
-        isOff: true,
-        hours: 0,
-        start: '',
-        end: '',
-        isAdjusted: true,
-        adjustmentRequestId: approvedShiftAdj.id,
-        adjustmentLabel: '🛋️ راحة معتمدة بطلب تعديل شيفت'
-      };
-    }
+      if (approvedShiftAdj.actionType === 'set_rest_day' || approvedShiftAdj.replacementRestDate === dateStr) {
+        return {
+          type: 'off',
+          isOff: true,
+          hours: 0,
+          start: '',
+          end: '',
+          isAdjusted: true,
+          adjustmentRequestId: approvedShiftAdj.id,
+          adjustmentLabel: '🛋️ راحة معتمدة بطلب تعديل شيفت'
+        };
+      }
 
-    if (approvedShiftAdj.newStartTime && approvedShiftAdj.newEndTime) {
-      return {
-        type: 'shift',
-        isOff: false,
-        start: approvedShiftAdj.newStartTime,
-        end: approvedShiftAdj.newEndTime,
-        hours: 8,
-        isAdjusted: true,
-        adjustmentRequestId: approvedShiftAdj.id,
-        adjustmentLabel: '🔄 شيفت معدل بطلب رسمي'
-      };
+      if (approvedShiftAdj.newStartTime && approvedShiftAdj.newEndTime) {
+        const adjHours = calcShiftDurationHours(approvedShiftAdj.newStartTime, approvedShiftAdj.newEndTime) || 8;
+        return {
+          type: 'shift',
+          isOff: false,
+          start: approvedShiftAdj.newStartTime,
+          end: approvedShiftAdj.newEndTime,
+          hours: adjHours,
+          isAdjusted: true,
+          adjustmentRequestId: approvedShiftAdj.id,
+          adjustmentLabel: '🔄 شيفت معدل بطلب رسمي'
+        };
+      }
     }
   }
 
@@ -1240,38 +1305,52 @@ export function getResolvedEmployeeRoster(employee, targetBranchId, arg3, arg4 =
   // 1. Flexible Argument Normalization (handles any parameter order)
   let state = null;
   let selectedMonth = null;
+  let targetDateStr = null;
   let explicitBranchId = targetBranchId;
 
   const isState = (val) => val && typeof val === 'object' && (val.rosters || val.requests || val.employees || val.branches || val.orgSettings !== undefined);
-  const isMonth = (val) => typeof val === 'string' && /^\d{4}-\d{1,2}/.test(val.trim());
+  const isDate = (val) => typeof val === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(val.trim());
+  const isMonth = (val) => typeof val === 'string' && /^\d{4}-\d{1,2}$/.test(val.trim());
 
   if (isState(arg3)) {
     state = arg3;
-    if (typeof arg4 === 'string') selectedMonth = arg4.match(/^\d{4}-\d{1,2}/)?.[0] || arg4;
+    if (isDate(arg4)) targetDateStr = arg4.trim();
+    else if (isMonth(arg4)) selectedMonth = arg4.trim();
+    else if (typeof arg4 === 'string') selectedMonth = arg4.match(/^\d{4}-\d{1,2}/)?.[0] || arg4;
   } else if (isState(arg4)) {
     state = arg4;
-    if (typeof arg3 === 'string') selectedMonth = arg3.match(/^\d{4}-\d{1,2}/)?.[0] || arg3;
+    if (isDate(arg3)) targetDateStr = arg3.trim();
+    else if (isMonth(arg3)) selectedMonth = arg3.trim();
+    else if (typeof arg3 === 'string') selectedMonth = arg3.match(/^\d{4}-\d{1,2}/)?.[0] || arg3;
   } else if (isState(explicitBranchId)) {
     state = explicitBranchId;
     explicitBranchId = null;
-    if (typeof arg3 === 'string') selectedMonth = arg3.match(/^\d{4}-\d{1,2}/)?.[0] || arg3;
+    if (isDate(arg3)) targetDateStr = arg3.trim();
+    else if (isMonth(arg3)) selectedMonth = arg3.trim();
+    else if (typeof arg3 === 'string') selectedMonth = arg3.match(/^\d{4}-\d{1,2}/)?.[0] || arg3;
   } else if (arg3 && typeof arg3 === 'object') {
     state = arg3;
-    if (typeof arg4 === 'string') selectedMonth = arg4.match(/^\d{4}-\d{1,2}/)?.[0] || arg4;
+    if (isDate(arg4)) targetDateStr = arg4.trim();
+    else if (isMonth(arg4)) selectedMonth = arg4.trim();
+    else if (typeof arg4 === 'string') selectedMonth = arg4.match(/^\d{4}-\d{1,2}/)?.[0] || arg4;
   }
 
-  // If explicitBranchId is a month string (e.g., '2026-10'):
-  if (isMonth(explicitBranchId)) {
-    if (!selectedMonth) selectedMonth = explicitBranchId.trim().match(/^\d{4}-\d{1,2}/)?.[0] || explicitBranchId.trim();
+  // If explicitBranchId is a date or month:
+  if (isDate(explicitBranchId)) {
+    targetDateStr = explicitBranchId.trim();
+    explicitBranchId = null;
+  } else if (isMonth(explicitBranchId)) {
+    selectedMonth = explicitBranchId.trim();
     explicitBranchId = null;
   }
-  if (!selectedMonth && typeof arg3 === 'string') {
-    const m = arg3.trim().match(/^(\d{4}-\d{1,2})/);
-    if (m) selectedMonth = m[1];
-  }
-  if (!selectedMonth && typeof arg4 === 'string') {
-    const m = arg4.trim().match(/^(\d{4}-\d{1,2})/);
-    if (m) selectedMonth = m[1];
+
+  // 🌟 إذا تم تمرير تاريخ يوم محدد (مثل: '2026-10-21')، نحدد دورة الرواتب الصحيحة لذلك اليوم تلقائياً
+  if (targetDateStr) {
+    try {
+      selectedMonth = getActivePayrollMonth(state?.orgSettings || {}, new Date(targetDateStr + 'T00:00:00'));
+    } catch {
+      selectedMonth = targetDateStr.slice(0, 7);
+    }
   }
 
   if (!state) return null;
@@ -1382,28 +1461,30 @@ export function getResolvedEmployeeRoster(employee, targetBranchId, arg3, arg4 =
       }
     }
 
-    // Check against employee's primary branch or assigned branches
-    if (!isMultiBranch) {
-      const empPrimaryBStr = extractBranchStr(employee.branchId);
-      if (empPrimaryBStr && (empPrimaryBStr === targetBIdStr || (targetBObj && empPrimaryBStr === String(targetBObj.id)))) {
-        if (itemBStr === empPrimaryBStr) return true;
-      }
-
-      const isAssigned = 
-        String(employee.branchId || '') === targetBIdStr ||
-        (targetBObj && String(employee.branchId || '') === String(targetBObj.id)) ||
-        (Array.isArray(employee.branchesDetails) && employee.branchesDetails.some(bd => {
-          const bdStr = extractBranchStr(bd.branchId || bd.id);
-          return bdStr === targetBIdStr || (targetBObj && bdStr === String(targetBObj.id));
-        }));
-
-      if (isAssigned) {
-        if (itemBStr === empPrimaryBStr) return true;
-        return true;
-      }
+    // إذا كان للروستر فرع صريح، يجب أن يطابق الفرع المطلوب بدقة
+    if (itemBStr && itemBStr !== 'all' && itemBStr !== 'all_branches') {
+      const matchesTarget = itemBStr.toLowerCase() === targetBIdStr.toLowerCase() ||
+        (targetBObj && (
+          itemBStr === String(targetBObj.id) ||
+          (targetBObj.branchCode && itemBStr.toLowerCase() === String(targetBObj.branchCode).toLowerCase()) ||
+          (targetBObj.name && itemBStr.toLowerCase() === String(targetBObj.name).trim().toLowerCase())
+        ));
+      return Boolean(matchesTarget);
     }
 
-    return false;
+    // إذا لم يكن للروستر فرع محدد (جدول عام)، نتحقق من أن الموظف يعمل بالفعل في هذا الفرع المستهدف
+    const empPrimaryBStr = extractBranchStr(effectiveEmp.branchId);
+    if (empPrimaryBStr && (empPrimaryBStr === targetBIdStr || (targetBObj && empPrimaryBStr === String(targetBObj.id)))) {
+      return true;
+    }
+
+    const isCurrentlyInBranch = Array.isArray(effectiveEmp.branchesDetails) && effectiveEmp.branchesDetails.some(bd => {
+      if (!bd || bd.isResigned || bd.resigned || bd.status === 'resigned') return false;
+      const bdStr = extractBranchStr(bd.branchId || bd.id);
+      return bdStr === targetBIdStr || (targetBObj && bdStr === String(targetBObj.id));
+    });
+
+    return Boolean(isCurrentlyInBranch);
   };
 
   // Determine Cycle Date Range if selectedMonth is provided
@@ -1432,35 +1513,35 @@ export function getResolvedEmployeeRoster(employee, targetBranchId, arg3, arg4 =
     const itemMonth = normalizeMonth(rawMonth);
 
     if (normSelectedMonth) {
-      // 1. Direct exact month match
+      // 1. Direct exact month match (dominant priority: 1000 points)
       if (itemMonth === normSelectedMonth) {
-        score = 100;
+        score = 1000;
       }
       // 2. Date range overlaps with this month's payroll cycle
       else if (cycleRange && item.fromDate && item.toDate) {
         if (item.fromDate <= cycleRange.endDate && item.toDate >= cycleRange.startDate) {
-          score = 95;
+          score = 900;
         }
       }
       // 3. fromDate starts within this cycle
       else if (cycleRange && item.fromDate && item.fromDate >= cycleRange.startDate && item.fromDate <= cycleRange.endDate) {
-        score = 90;
+        score = 850;
       }
       // 4. fromDate starts with selectedMonth
       else if (item.fromDate && normalizeMonth(String(item.fromDate).slice(0, 7)) === normSelectedMonth) {
-        score = 85;
+        score = 800;
       }
       // 5. Standing / Recurring schedule (perpetual operational roster without month/date boundaries)
       else if (!item.month && !item.fromDate) {
-        score = 80;
+        score = 500;
       }
       // 6. Most recent approved roster from an earlier month/cycle that carries forward
       else if (itemMonth && itemMonth < normSelectedMonth) {
-        score = 70;
+        score = 200;
       }
       // 7. Approved roster starting earlier
       else if (cycleRange && item.fromDate && item.fromDate < cycleRange.startDate) {
-        score = (!item.toDate || item.toDate >= cycleRange.startDate) ? 68 : 60;
+        score = (!item.toDate || item.toDate >= cycleRange.startDate) ? 150 : 100;
       }
       // 8. General approved roster
       else {
@@ -1468,8 +1549,8 @@ export function getResolvedEmployeeRoster(employee, targetBranchId, arg3, arg4 =
       }
     } else {
       // No selectedMonth filter requested -> prefer standing or newest
-      if (!item.month && !item.fromDate) score = 90;
-      else score = 75;
+      if (!item.month && !item.fromDate) score = 500;
+      else score = 200;
     }
 
     // Give priority to rosters with an actual schedule object and valid days
@@ -1478,7 +1559,11 @@ export function getResolvedEmployeeRoster(employee, targetBranchId, arg3, arg4 =
       score += 5;
       // أولوية إضافية للجداول التي تحتوي على تواريخ تفصيلية للدورة الكاملة
       if (Object.keys(sch).some(k => /^\d{4}-\d{2}-\d{2}$/.test(k))) {
-        score += 10;
+        score += 20;
+      }
+      // 🌟 أولوية حاسمة إذا كان الجدول يحتوي على التاريخ المطلوب بالتحديد
+      if (targetDateStr && sch[targetDateStr]) {
+        score += 50;
       }
     }
 
@@ -1490,9 +1575,9 @@ export function getResolvedEmployeeRoster(employee, targetBranchId, arg3, arg4 =
       }
     }
 
-    // إذا لم يحدد فرع مستهدف وطلبنا جدولاً شاملاً، نمنح الأولوية للجدول الموحد الرئيسي (+250 نقطة)
+    // إذا لم يحدد فرع مستهدف وطلبنا جدولاً شاملاً، نمنح أولوية إضافية للجدول الموحد الرئيسي (+50 نقطة كمعيار فرعي)
     if (!targetBIdStr && (item.isUnifiedMaster || item.id?.includes('unified') || (item.isMultiBranch && !String(item.id || '').includes('_b_')))) {
-      score += 250;
+      score += 50;
     }
 
     return score;
@@ -1618,6 +1703,16 @@ export function getResolvedEmployeeRoster(employee, targetBranchId, arg3, arg4 =
   }
 
   if (candidates.length === 0) {
+    // 🌟 صمام أمان حاسم: إذا كان البحث لفرع محدد ولم نجد له جدولاً منفصلاً،
+    // نتحقق أولاً مما إذا كان للموظف جدول شهري معتمد أساسي (في فرعه الأصلي أو جدول عام)
+    // لتفادي فرض جدول افتراضي وهمي 09:00 صباحاً والتسبب في تسجيل مئات دقائق التأخير بالخطأ
+    if (targetBIdStr) {
+      const primaryRoster = getResolvedEmployeeRoster(employee, null, arg3, arg4);
+      if (primaryRoster && !primaryRoster.isFallback && primaryRoster.schedule && Object.keys(primaryRoster.schedule).length > 0) {
+        return primaryRoster;
+      }
+    }
+
     // 5. صمام الأمان النهائي: توليد جدول افتراضي يستند إلى ساعات العمل المقررة في ملف الموظف وفرعه
     const rawHrs = parseFloat(employee.workHoursPerDay || employee.workHours || 8) || 8;
     const hours = Math.min(16, Math.max(4, rawHrs));

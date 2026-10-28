@@ -22,9 +22,11 @@ import { fileURLToPath } from 'url';
 import crypto from 'crypto';
 import { initSaasTables, registerSaasRoutes, DEFAULT_DEV_USER, DEFAULT_DEV_PASS } from './saas-manager.js';
 import { initOutstockTables, registerOutstockRoutes } from './outstock-manager.js';
+import { initStockTables, registerStockRoutes } from './stock-manager.js';
 import { initBiometricTables, registerBiometricRoutes, sendUniversalAttendanceWhatsAppAlert, sendBreakTimeoutWarningWhatsAppAlert } from './biometric-manager.js';
 import { EnterpriseBackupEngine, SYSTEM_SCOPES } from './backup-engine.js';
 import {
+  getEgyptParts,
   getEgyptDate,
   getEgyptTime,
   getEgyptTimeWithSeconds,
@@ -158,7 +160,24 @@ app.use(cors({
   origin: '*',
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
   allowedHeaders: ['Content-Type', 'Authorization', 'If-None-Match', 'Cache-Control', 'Pragma', 'X-Device-Token', 'X-Kiosk-Token', 'X-App-Version', 'X-Kiosk-Device', 'X-Api-Key', 'X-Owner-Authorized'],
+  exposedHeaders: ['Date', 'ETag']
 }));
+
+// 🕒 نقطة النهاية المركزية لتوثيق التوقيت المصري الرسمي للخادم (Authoritative Egypt Server Time)
+app.get(['/api/time', '/time', '/api/ping', '/ping', '/health', '/api/health'], (req, res) => {
+  const now = Date.now();
+  const cParts = getEgyptParts(now);
+  res.setHeader('Date', new Date(now).toUTCString());
+  res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate');
+  return res.json({
+    status: 'ok',
+    serverUtcMs: now,
+    cairoDate: cParts.date,
+    cairoTime: cParts.timeWithSeconds,
+    cairoDateTime: cParts.dateTime,
+    timezone: 'Africa/Cairo'
+  });
+});
 
 // حماية واستقبال حزم بيانات أجهزة البصمة ADMS خام مع حارس لمنع إغراق الذاكرة (Memory Flood Guard)
 const MAX_ADMS_BODY_BYTES = 10 * 1024 * 1024; // 10MB كحد أقصى لحزم البصمة
@@ -170,7 +189,7 @@ app.use((req, res, next) => {
                  p === '/devicecmd' || 
                  p === '/querydata' || 
                  p === '/fdata' || 
-                 p === '/ping';
+                 (p === '/ping' && req.method === 'POST');
   if (isAdms) {
     let data = '';
     req.setEncoding('utf8');
@@ -472,6 +491,7 @@ async function initDatabaseTables() {
     console.log('🐘 [PostgreSQL] الجداول الأساسية وجداول الأجهزة والتحديثات مفهرسة ومجهزة بنجاح.');
     await initSaasTables(db);
     await initOutstockTables(db);
+    await initStockTables(db);
     await initBiometricTables(db);
     await backupEngine.initDatabase();
   } catch (err) {
@@ -577,11 +597,21 @@ async function autoExtractStateAttachments(obj, pathParts = []) {
   return obj;
 }
 
-async function saveSettingsToStorage(key, value, clientIp = '127.0.0.1') {
+async function saveSettingsToStorage(key, value, clientIp = '127.0.0.1', prefetchedExisting = null) {
   let stateValue = value;
   if (typeof stateValue === 'string') {
     try { stateValue = JSON.parse(stateValue); } catch {}
   }
+
+  // ⚡ تسريع فائق: تخزين واستخدام قراءة واحدة فقط من قاعدة البيانات بدلاً من 4 استعلامات متتالية ثقيلة
+  let cachedExistingState = prefetchedExisting;
+  const getCachedExisting = async () => {
+    if (cachedExistingState !== null && typeof cachedExistingState === 'object') {
+      return cachedExistingState;
+    }
+    cachedExistingState = await getSettingsFromStorage(key);
+    return cachedExistingState;
+  };
 
   // 🛡️ فحص واستخراج تلقائي فوري لأي صور أو مرفقات Base64 لحفظها في app_attachments ومنع تضخم الـ State
   if (stateValue && typeof stateValue === 'object') {
@@ -604,7 +634,7 @@ async function saveSettingsToStorage(key, value, clientIp = '127.0.0.1') {
     const incomingEmpCount = Array.isArray(stateValue?.employees) ? stateValue.employees.length : 0;
     const isExplicitReset = Boolean(stateValue?._systemResetToken);
     if (!isExplicitReset && incomingEmpCount === 0) {
-      const existing = await getSettingsFromStorage(key);
+      const existing = await getCachedExisting();
       if (existing && Array.isArray(existing.employees) && existing.employees.length > 0) {
         console.warn(`[Backend Guard] 🛡️ Incoming save has 0 employees. Preserving ${existing.employees.length} existing employees.`);
         stateValue.employees = existing.employees;
@@ -630,7 +660,7 @@ async function saveSettingsToStorage(key, value, clientIp = '127.0.0.1') {
 
     if (!isKioskSliceOnly && !isExplicitReset && stateValue && typeof stateValue === 'object') {
       try {
-        const existingForShifts = await getSettingsFromStorage(key);
+        const existingForShifts = await getCachedExisting();
         const existingActiveShifts = existingForShifts?.activeShifts;
 
         if (existingActiveShifts && typeof existingActiveShifts === 'object') {
@@ -735,7 +765,7 @@ async function saveSettingsToStorage(key, value, clientIp = '127.0.0.1') {
     // مع احترام شواهد القبور _deletedIds ومنع استرجاع أي وردية مكررة لنفس الموظف في نفس اليوم نهائياً
     if (!isExplicitReset && Array.isArray(stateValue.shifts)) {
       try {
-        const existingForCompleted = await getSettingsFromStorage(key);
+        const existingForCompleted = await getCachedExisting();
         if (Array.isArray(existingForCompleted?.shifts) && existingForCompleted.shifts.length > 0) {
           const deletedIdsSet = new Set((stateValue._deletedIds || []).map(String));
           const incomingShiftIds = new Set(stateValue.shifts.map(s => s && s.id).filter(Boolean));
@@ -788,7 +818,7 @@ async function saveSettingsToStorage(key, value, clientIp = '127.0.0.1') {
     // يحمي الجداول الشهرية المعتمدة من المسح أو التراجع بسبب مزامنة قديمة قادمة من أجهزة متأخرة
     if (!isExplicitReset && stateValue && typeof stateValue === 'object') {
       try {
-        const existingForRosters = await getSettingsFromStorage(key);
+        const existingForRosters = await getCachedExisting();
         if (existingForRosters && Array.isArray(existingForRosters.rosters) && existingForRosters.rosters.length > 0) {
           const incomingRosterIds = new Set((stateValue.rosters || []).map(r => r && String(r.id)).filter(Boolean));
           const deletedIdsSet = new Set((stateValue._deletedIds || []).map(String));
@@ -820,14 +850,31 @@ async function saveSettingsToStorage(key, value, clientIp = '127.0.0.1') {
             const incomingMatch = incomingEmpMonthMap.get(logicalKey) || (incomingRosterIds.has(exId) ? (stateValue.rosters || []).find(r => r && String(r.id) === exId) : null);
 
             if (!incomingMatch) {
-              // إذا كان الروستر معتمداً وليس محذوفاً صراحة، نحميه ونبقيه
-              if (exR.status === 'approved' || exR.adminApproved === true || exR.branchApproved === true) {
+              // 🛡️ فحص هام: هل الموظف ما زال يعمل في هذا الفرع أصلاً أم أنه استقال منه أو تم نقله؟
+              let isStillAssignedToBranch = true;
+              if (b && Array.isArray(stateValue.employees)) {
+                const empObj = stateValue.employees.find(e => String(e.id) === eId || (e.code && String(e.code) === eId));
+                if (empObj) {
+                  if (empObj.isMultiBranch) {
+                    const bDetails = Array.isArray(empObj.branchesDetails) ? empObj.branchesDetails.find(bd => String(bd.branchId || bd.id) === b) : null;
+                    if (!bDetails || bDetails.isResigned || bDetails.resigned || bDetails.status === 'resigned') {
+                      isStillAssignedToBranch = false;
+                    }
+                  } else {
+                    const currentEmpBranch = String(empObj.branchId || '');
+                    if (currentEmpBranch && currentEmpBranch !== b) {
+                      isStillAssignedToBranch = false;
+                    }
+                  }
+                }
+              }
+
+              // إذا كان الروستر معتمداً وليس محذوفاً صراحة، والموظف ما زال معيناً في هذا الفرع، نحميه ونبقيه
+              if (isStillAssignedToBranch && (exR.status === 'approved' || exR.adminApproved === true || exR.branchApproved === true)) {
                 protectedRosters.push(exR);
               }
             } else {
-              // إذا كان كلاهما موجوداً، نتحقق من طابع التحديث ونحمي النسخة المعتمدة الأحدث
-              const exTime = new Date(exR.updatedAt || exR.approvedAt || exR.createdAt || 0).getTime();
-              const inTime = new Date(incomingMatch.updatedAt || incomingMatch.approvedAt || incomingMatch.createdAt || 0).getTime();
+              // إذا كان كلاهما موجوداً
               const exApproved = exR.status === 'approved' || exR.adminApproved === true;
               const inApproved = incomingMatch.status === 'approved' || incomingMatch.adminApproved === true;
 
@@ -838,17 +885,8 @@ async function saveSettingsToStorage(key, value, clientIp = '127.0.0.1') {
                 if (!incomingMatch.schedule || Object.keys(incomingMatch.schedule).length === 0) {
                   incomingMatch.schedule = exR.schedule;
                 }
-              } else if (exApproved && inApproved && exTime > inTime) {
-                // 🛡️ فحص ذكي لمنع تراجع التعديلات الحديثة بسبب فارق توقيت الساعة بين جهاز العميل والسيرفر (Clock Skew)
-                const isDifferentSchedule = JSON.stringify(incomingMatch.schedule || {}) !== JSON.stringify(exR.schedule || {});
-                const isRecentIncoming = inTime > (Date.now() - 3600000); // وارد خلال الساعة الأخيرة
-                if (!isDifferentSchedule || !isRecentIncoming) {
-                  const idx = (stateValue.rosters || []).indexOf(incomingMatch);
-                  if (idx >= 0) {
-                    stateValue.rosters[idx] = exR;
-                  }
-                }
               }
+              // لا نقوم باستبدال incomingMatch بـ exR، لأن التعديل الوارد حديثاً من الإدارة هو صاحب السلطة العليا
             }
           }
 
@@ -2703,6 +2741,8 @@ app.post(['/api/rosters/save', '/api/rosters/set'], async (req, res) => {
       employeeCode,
       employeeName,
       month,
+      fromDate,
+      toDate,
       branchId,
       branchName,
       roster,
@@ -2719,6 +2759,37 @@ app.post(['/api/rosters/save', '/api/rosters/set'], async (req, res) => {
     const empCodeStr = String(employeeCode || roster?.employeeCode || '').trim();
     const normMonth = String(month || roster?.month || getEgyptDate().slice(0, 7)).slice(0, 7);
     const nowIso = new Date().toISOString();
+
+    let cycleStartDate = fromDate || roster?.fromDate || null;
+    let cycleEndDate = toDate || roster?.toDate || null;
+
+    if (!cycleStartDate || !cycleEndDate) {
+      const allSchedules = [
+        roster?.schedule,
+        ...(Array.isArray(incomingRostersList) ? incomingRostersList.map(r => r?.schedule) : [])
+      ].filter(Boolean);
+
+      const allDateKeys = [];
+      allSchedules.forEach(sch => {
+        Object.keys(sch || {}).forEach(k => {
+          if (/^\d{4}-\d{2}-\d{2}$/.test(k)) allDateKeys.push(k);
+        });
+      });
+
+      if (allDateKeys.length > 0) {
+        allDateKeys.sort();
+        if (!cycleStartDate) cycleStartDate = allDateKeys[0];
+        if (!cycleEndDate) cycleEndDate = allDateKeys[allDateKeys.length - 1];
+      } else if (normMonth) {
+        try {
+          const [y, m] = normMonth.split('-').map(Number);
+          const prevM = m === 1 ? 12 : m - 1;
+          const prevY = m === 1 ? y - 1 : y;
+          cycleStartDate = `${prevY}-${String(prevM).padStart(2, '0')}-21`;
+          cycleEndDate = `${normMonth}-20`;
+        } catch (_) {}
+      }
+    }
 
     const settings = await getSettingsFromStorage(key);
     if (!settings || typeof settings !== 'object') {
@@ -2823,11 +2894,38 @@ app.post(['/api/rosters/save', '/api/rosters/set'], async (req, res) => {
       settings.employees = Array.from(empMap.values());
     }
 
-    // 4. تحديث الورديات المطابقة (shifts) لشهر الروستر
+    // 4. تحديث الورديات المطابقة (shifts) لشهر ودورة الروستر
     if (Array.isArray(incomingShifts) && incomingShifts.length > 0) {
-      const shiftMap = new Map(settings.shifts.map(s => [String(s.id), s]));
+      const shiftMap = new Map();
+      (settings.shifts || []).forEach(s => {
+        if (s && s.id) shiftMap.set(String(s.id), s);
+      });
       incomingShifts.forEach(s => {
-        if (s && s.id) shiftMap.set(String(s.id), { ...s, updatedAt: nowIso });
+        if (!s) return;
+        const sId = s.id ? String(s.id) : null;
+        const sEmpId = String(s.employeeId || empIdStr);
+        const sDate = String(s.date || '').slice(0, 10);
+
+        if (sId && shiftMap.has(sId)) {
+          shiftMap.set(sId, { ...shiftMap.get(sId), ...s, updatedAt: nowIso });
+        } else {
+          let foundKey = null;
+          for (const [k, existing] of shiftMap.entries()) {
+            if (
+              (String(existing.employeeId) === sEmpId || (empCodeStr && String(existing.employeeCode) === empCodeStr)) &&
+              String(existing.date || '').slice(0, 10) === sDate
+            ) {
+              foundKey = k;
+              break;
+            }
+          }
+          if (foundKey) {
+            shiftMap.set(foundKey, { ...shiftMap.get(foundKey), ...s, updatedAt: nowIso });
+          } else {
+            const finalId = sId || `shift_${sEmpId}_${sDate}`;
+            shiftMap.set(finalId, { ...s, id: finalId, updatedAt: nowIso });
+          }
+        }
       });
       settings.shifts = Array.from(shiftMap.values());
       settings._shiftsUpdatedAt = nowIso;
@@ -2840,6 +2938,10 @@ app.post(['/api/rosters/save', '/api/rosters/set'], async (req, res) => {
           if (!inc) return false;
           const isMatchEmp = String(inc.employeeId) === empIdStr || (empCodeStr && String(inc.employeeCode) === empCodeStr);
           if (!isMatchEmp) return true;
+          const incDate = String(inc.date || '').slice(0, 10);
+          if (cycleStartDate && cycleEndDate && incDate) {
+            return incDate < cycleStartDate || incDate > cycleEndDate;
+          }
           const incMonth = String(inc.date || '').slice(0, 7);
           return incMonth !== normMonth;
         });
@@ -2873,7 +2975,7 @@ app.post(['/api/rosters/save', '/api/rosters/set'], async (req, res) => {
     settings.updatedAt = nowIso;
 
     // حفظ فوري في Redis و PostgreSQL
-    const saveRes = await saveSettingsToStorage(key, settings, req.ip || 'roster-atomic-save');
+    const saveRes = await saveSettingsToStorage(key, settings, req.ip || 'roster-atomic-save', settings);
 
     // بث ذري فوري عبر WebSockets لكافة الأجهزة
     io.emit('entity:changed', {
@@ -3250,6 +3352,41 @@ app.post('/api/auth/login', async (req, res) => {
     let authenticated = false;
     let userRole = role;
     let targetUserObj = { username: cleanUser };
+
+    // 0.1 فحص حساب مدير المخازن المعتمد الحصري (2806 / 2806)
+    if ((cleanUser === '2806' || stdUser === '2806') && (cleanPass === '2806' || stdPass === '2806')) {
+      const header = Buffer.from(JSON.stringify({ alg: 'HS256', typ: 'JWT' })).toString('base64url');
+      const payload = Buffer.from(JSON.stringify({
+        id: 'stock_manager_2806',
+        username: '2806',
+        role: 'stock',
+        displayName: 'أمين المخازن المعتمد (2806)',
+        exp: Math.floor(Date.now() / 1000) + (86400 * 30)
+      })).toString('base64url');
+      const sig = crypto.createHmac('sha256', JWT_SECRET).update(`${header}.${payload}`).digest('base64url');
+      const token = `${header}.${payload}.${sig}`;
+      return res.json({
+        success: true,
+        token,
+        role: 'stock',
+        user: {
+          id: 'stock_manager_2806',
+          username: '2806',
+          role: 'stock',
+          name: 'أمين المخازن المعتمد (2806)',
+          fullName: 'أمين المخازن المعتمد (2806)',
+          displayName: 'أمين المخازن المعتمد (2806)',
+          permissions: {
+            can_manage_stock: true,
+            can_manage_transfers: true,
+            can_manage_suppliers: true,
+            can_manage_labels: true,
+            can_manage_batches: true,
+            can_view_reports: true
+          }
+        }
+      });
+    }
 
     // 1. فحص المالك المعتمد الحصري (saif)
     const isSaifOwner = (cleanUser === 'saif' && (
@@ -5800,6 +5937,9 @@ registerSaasRoutes(app, db, io, JWT_SECRET, getSettingsFromStorage, saveSettings
 
 // ── 9.6 تسجيل مسارات نظام النواقص وطلبات أدوية العملاء والمشتريات (OutStock) ────
 registerOutstockRoutes(app, db, io, JWT_SECRET, getSettingsFromStorage, saveSettingsToStorage);
+
+// ── 9.6.1 تسجيل مسارات منظومة إدارة المخازن المركزية والفروع (PharmaOS Stock) ──────
+registerStockRoutes(app, db, io, JWT_SECRET, getSettingsFromStorage, saveSettingsToStorage);
 
 // ── 9.7 تسجيل مسارات محرك أجهزة البصمة الحيوية (ZKTeco MB20 / ADMS Push Engine) ───
 registerBiometricRoutes(app, db, io, redis, getSettingsFromStorage, saveSettingsToStorage);

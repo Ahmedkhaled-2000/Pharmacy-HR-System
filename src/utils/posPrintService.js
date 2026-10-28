@@ -30,8 +30,12 @@ export function generatePosReceiptHtml(sale, branch = null, cashierName = 'صي�
   const paymentMethodLabel = {
     cash: 'نقدي (Cash) 💵',
     card: 'بطاقة بنكية / فيزا 💳',
+    visa: 'بطاقة بنكية / فيزا 💳',
     split: 'دفع متعدد 🔀',
     wallet: 'محفظة إلكترونية 📱',
+    customer_wallet: 'رصيد محفظة العميل 💰',
+    telecom_wallet: 'محفظة كاش (فودافون/إتصالات/أورنج) 📱',
+    instapay: 'إنستاباي (InstaPay) ⚡',
     credit: 'حساب آجل عميل 📋',
     insurance: 'تأمين طبي 🏥'
   }[sale.paymentMethod || 'cash'] || 'نقدي';
@@ -240,6 +244,16 @@ export function generatePosReceiptHtml(sale, branch = null, cashierName = 'صي�
     <div class="totals-row" style="color: #b91c1c;">
       <span>قيمة الخصم:</span>
       <span>-${discount} ج</span>
+    </div>` : ''}
+    ${parseFloat(sale.deliveryFee || sale.deliveryDetails?.deliveryFee || 0) > 0 ? `
+    <div class="totals-row" style="color: #4338ca;">
+      <span>خدمة التوصيل (دليفري):</span>
+      <span>+${parseFloat(sale.deliveryFee || sale.deliveryDetails?.deliveryFee || 0).toFixed(2)} ج</span>
+    </div>` : ''}
+    ${parseFloat(sale.walletDeducted || 0) > 0 ? `
+    <div class="totals-row" style="color: #047857;">
+      <span>خصم من رصيد المحفظة:</span>
+      <span>-${parseFloat(sale.walletDeducted).toFixed(2)} ج</span>
     </div>` : ''}
     <div class="totals-row grand-total">
       <span>الصافي النهائي المطلوب:</span>

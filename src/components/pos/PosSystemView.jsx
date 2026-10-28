@@ -17,8 +17,14 @@ import PosDeliveryModal from './PosDeliveryModal';
 import PosCustomerModal from './PosCustomerModal';
 import PosCustomerHistoryModal from './PosCustomerHistoryModal';
 import PosOwnerMultiBranchHub from './PosOwnerMultiBranchHub';
+import PosRightSidebar from './PosRightSidebar';
+import PosWhatsAppModal from './PosWhatsAppModal';
+import PosLabelPrintModal from './PosLabelPrintModal';
+import PosBranchTransferReceiveModal from './PosBranchTransferReceiveModal';
 
 function PosSystemContent() {
+  const [isLabelPrintModalOpen, setIsLabelPrintModalOpen] = React.useState(false);
+  const [isTransferReceiveModalOpen, setIsTransferReceiveModalOpen] = React.useState(false);
   const {
     openNewSalesWindow,
     setIsSubstitutesModalOpen,
@@ -34,6 +40,7 @@ function PosSystemContent() {
     setIsBranchStockModalOpen,
     setIsCustomerModalOpen,
     setIsOwnerHubOpen,
+    setIsWhatsAppModalOpen,
     salesWindows,
     activeWindowId,
     toggleCartItemUnit,
@@ -144,8 +151,8 @@ function PosSystemContent() {
           setIsDeadStockModalOpen(true);
           break;
         case 'F11':
-          // أدوية الأمراض المزمنة
-          setIsChronicModalOpen(true);
+          // مركز واتساب الفرع لخدمة العملاء
+          setIsWhatsAppModalOpen(true);
           break;
         case 'F12':
           // إغلاق وتسوية الوردية
@@ -223,8 +230,17 @@ function PosSystemContent() {
       }
     };
 
+    const handleOpenLabelPrint = () => setIsLabelPrintModalOpen(true);
+    const handleOpenTransferReceive = () => setIsTransferReceiveModalOpen(true);
+
+    window.addEventListener('pos:open-label-print', handleOpenLabelPrint);
+    window.addEventListener('pos:open-transfer-receive', handleOpenTransferReceive);
     window.addEventListener('pos:trigger-action', handleTriggerAction);
-    return () => window.removeEventListener('pos:trigger-action', handleTriggerAction);
+    return () => {
+      window.removeEventListener('pos:open-label-print', handleOpenLabelPrint);
+      window.removeEventListener('pos:open-transfer-receive', handleOpenTransferReceive);
+      window.removeEventListener('pos:trigger-action', handleTriggerAction);
+    };
   }, [
     openNewSalesWindow,
     setIsSubstitutesModalOpen,
@@ -240,12 +256,20 @@ function PosSystemContent() {
   ]);
 
   return (
-    <div className="pos-system-root">
-      {/* لوحة التحكم الرئيسية */}
+    <div className="pos-system-root" style={{ display: 'flex', flexDirection: 'column', height: '100%', overflow: 'hidden' }}>
+      {/* لوحة التحكم الرئيسية العلوية */}
       <PosDashboard />
 
-      {/* لوحة النوافذ العائمة المنبثقة المتعددة */}
-      <PosMultiWindowManager />
+      {/* منطقة العمل الرئيسية: مساحة البيع والنوافذ المنبثقة + الشريط الجانبي الأيمن الدائم */}
+      <div className="pos-main-workspace" style={{ display: 'flex', flex: 1, overflow: 'hidden', position: 'relative', width: '100%', height: '100%' }}>
+        {/* الشريط الجانبي الأيمن: الشعار + الساعة + الفرع + الكاشير + الخزنة + الاختصارات */}
+        <PosRightSidebar />
+
+        {/* مساحة النوافذ العائمة تمتد حرة بكامل أبعاد الشاشة وفوق الشريط الجانبي */}
+        <div style={{ position: 'absolute', inset: 0, pointerEvents: 'none', zIndex: 100, overflow: 'hidden' }}>
+          <PosMultiWindowManager />
+        </div>
+      </div>
 
       {/* كافة المودالات الوظيفية */}
       <PosPaymentModal />
@@ -261,6 +285,19 @@ function PosSystemContent() {
       <PosCustomerModal />
       <PosCustomerHistoryModal />
       <PosOwnerMultiBranchHub />
+      <PosWhatsAppModal />
+
+      {/* مودال طباعة ملصقات الباركود الحرارية */}
+      <PosLabelPrintModal
+        isOpen={isLabelPrintModalOpen}
+        onClose={() => setIsLabelPrintModalOpen(false)}
+      />
+
+      {/* مودال استلام بضاعة وتحويلات المخزن المركزي بالكود */}
+      <PosBranchTransferReceiveModal
+        isOpen={isTransferReceiveModalOpen}
+        onClose={() => setIsTransferReceiveModalOpen(false)}
+      />
 
       {/* مركز التقارير والرقابة الحصري لنظام نقاط البيع */}
       <PosReportsCenter

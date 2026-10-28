@@ -221,13 +221,16 @@
 
 /* ── 5. محرك النوافذ المنبثقة العائمة (Floating Multi-Window Canvas) ── */
 .pos-floating-windows-canvas {
-  position: fixed;
+  position: absolute;
   top: 0;
   left: 0;
-  width: 100vw;
-  height: 100vh;
+  right: 0;
+  bottom: 0;
+  width: 100%;
+  height: 100%;
   pointer-events: none; /* يسمح بالنقر على الخلفية ما لم تكن فوق نافذة */
-  z-index: 1050;
+  z-index: 10;
+  overflow: hidden;
 }
 
 .pos-floating-window-frame {
@@ -250,10 +253,12 @@
 }
 
 .pos-floating-window-frame.is-maximized {
-  top: 36px !important;
+  top: 0 !important;
   left: 0 !important;
-  width: 100vw !important;
-  height: calc(100vh - 36px - 48px) !important;
+  right: 0 !important;
+  bottom: 0 !important;
+  width: 100% !important;
+  height: 100% !important;
   border-radius: 0 !important;
 }
 
@@ -362,15 +367,73 @@
   background: var(--surface, #ffffff);
 }
 
-/* مقبض تغيير حجم النافذة (Resize Handle) */
-.pos-window-resizer {
+/* مقابض تغيير الأبعاد الثمانية من كافة أطراف وجوانب النافذة */
+.pos-resize-handle {
   position: absolute;
+  z-index: 100;
+  user-select: none;
+}
+.pos-resize-n {
+  top: 0;
+  left: 12px;
+  right: 12px;
+  height: 8px;
+  cursor: n-resize;
+}
+.pos-resize-s {
+  bottom: 0;
+  left: 12px;
+  right: 12px;
+  height: 8px;
+  cursor: s-resize;
+}
+.pos-resize-w {
+  top: 12px;
+  bottom: 12px;
+  left: 0;
+  width: 8px;
+  cursor: w-resize;
+}
+.pos-resize-e {
+  top: 12px;
+  bottom: 12px;
+  right: 0;
+  width: 8px;
+  cursor: e-resize;
+}
+.pos-resize-nw {
+  top: 0;
+  left: 0;
+  width: 16px;
+  height: 16px;
+  cursor: nw-resize;
+}
+.pos-resize-ne {
+  top: 0;
+  right: 0;
+  width: 16px;
+  height: 16px;
+  cursor: ne-resize;
+}
+.pos-resize-sw {
   bottom: 0;
   left: 0;
+  width: 16px;
+  height: 16px;
+  cursor: sw-resize;
+}
+.pos-resize-se {
+  bottom: 0;
+  right: 0;
   width: 18px;
   height: 18px;
-  cursor: sw-resize;
-  z-index: 20;
+  cursor: se-resize;
+}
+
+/* تمييز صف الصنف المحدد في السلة */
+.is-selected-row {
+  background: #f0fdfa !important;
+  border-left: 3px solid #0d9488 !important;
 }
 
 /* ── 6. شريط النوافذ السفلية الراسية (Bottom POS Docking Bar) ── */
@@ -434,6 +497,7 @@
 /* ── 7. عناصر شاشة البيع السريعة (POS Sales Window View) ── */
 .pos-sales-layout {
   display: flex;
+  flex-direction: column;
   flex: 1;
   height: 100%;
   overflow: hidden;
@@ -444,10 +508,71 @@
   flex: 1;
   display: flex;
   flex-direction: column;
-  border-left: 1px solid var(--border, #cbd5e1);
-  padding: 12px 16px;
+  border-left: none;
+  padding: 10px 14px 4px 14px;
   overflow: hidden;
   background: var(--surface, #ffffff);
+}
+
+.pos-cart-table-wrap {
+  flex: 1;
+  overflow-y: auto;
+  min-height: 160px;
+}
+
+/* ── شريط التحكم السفلي الموحد لشاشة البيع (POS Sales Bottom Dock) ── */
+.pos-sales-bottom-dock {
+  display: grid;
+  grid-template-columns: 1.35fr 1.15fr 0.95fr;
+  gap: 10px;
+  padding: 10px 14px;
+  background: linear-gradient(180deg, #ffffff 0%, #f8fafc 100%);
+  border-top: 1.5px solid var(--border, #cbd5e1);
+  box-shadow: 0 -4px 15px rgba(0, 0, 0, 0.04);
+  z-index: 20;
+  flex-shrink: 0;
+  box-sizing: border-box;
+}
+
+.pos-dock-panel {
+  background: #ffffff;
+  border: 1px solid #e2e8f0;
+  border-radius: 12px;
+  padding: 8px 12px;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.02);
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+}
+
+.pos-dock-customer-panel {
+  border-right: 3px solid #0d9488;
+}
+
+.pos-dock-totals-panel {
+  border-right: 3px solid #6366f1;
+}
+
+.pos-dock-actions-panel {
+  border-right: 3px solid #10b981;
+}
+
+/* ── الشريط الجانبي الأيمن الدائم لنقاط البيع (Right Command Sidebar) ── */
+.pos-right-command-sidebar {
+  width: 300px;
+  min-width: 300px;
+  max-width: 300px;
+  height: 100%;
+  background: linear-gradient(180deg, #ffffff 0%, #f8fafc 100%);
+  border-left: 1.5px solid var(--border, #cbd5e1);
+  display: flex;
+  flex-direction: column;
+  direction: rtl;
+  box-sizing: border-box;
+  z-index: 40;
+  box-shadow: -4px 0 20px rgba(15, 23, 42, 0.04);
+  user-select: none;
+  overflow: hidden;
 }
 
 .pos-checkout-sidebar {
@@ -948,4 +1073,113 @@
   from { opacity: 0; }
   to { opacity: 1; }
 }
+
+/* ── 12. محاذاة التنبيهات المنبثقة الطافية فوق شريط النوافذ بالأسفل مباشرة ── */
+.toast {
+  bottom: 74px !important;
+  z-index: 99999 !important;
+  font-family: 'Segoe UI Variable Text', 'Cairo', Tahoma, sans-serif !important;
+  box-shadow: 0 10px 30px rgba(15, 23, 42, 0.25) !important;
+  border: 1px solid rgba(255, 255, 255, 0.2) !important;
+}
+
+/* ── 13. مقابض تغيير أبعاد النافذة بثمانية اتجاهات (8-Direction Perimeter Handles) ── */
+.pos-resize-handle {
+  position: absolute;
+  z-index: 60;
+  user-select: none;
+  touch-action: none;
+}
+.pos-resize-handle.pos-resize-n {
+  top: -2px;
+  left: 10px;
+  right: 10px;
+  height: 7px;
+  cursor: ns-resize;
+}
+.pos-resize-handle.pos-resize-s {
+  bottom: -2px;
+  left: 10px;
+  right: 10px;
+  height: 7px;
+  cursor: ns-resize;
+}
+.pos-resize-handle.pos-resize-w {
+  top: 10px;
+  bottom: 10px;
+  left: -2px;
+  width: 7px;
+  cursor: ew-resize;
+}
+.pos-resize-handle.pos-resize-e {
+  top: 10px;
+  bottom: 10px;
+  right: -2px;
+  width: 7px;
+  cursor: ew-resize;
+}
+.pos-resize-handle.pos-resize-nw {
+  top: -3px;
+  left: -3px;
+  width: 14px;
+  height: 14px;
+  cursor: nwse-resize;
+}
+.pos-resize-handle.pos-resize-ne {
+  top: -3px;
+  right: -3px;
+  width: 14px;
+  height: 14px;
+  cursor: nesw-resize;
+}
+.pos-resize-handle.pos-resize-sw {
+  bottom: -3px;
+  left: -3px;
+  width: 14px;
+  height: 14px;
+  cursor: nesw-resize;
+}
+.pos-resize-handle.pos-resize-se {
+  bottom: -3px;
+  right: -3px;
+  width: 14px;
+  height: 14px;
+  cursor: nwse-resize;
+}
+
+/* ── 14. النوافذ الزجاجية المحتواة داخل نافذة البيع (In-Window Glass Overlay) ── */
+.pos-in-window-overlay {
+  position: absolute;
+  inset: 0;
+  background: rgba(15, 23, 42, 0.55);
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
+  z-index: 500;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  direction: rtl;
+  border-radius: 14px;
+  padding: 16px;
+  animation: posFadeIn 0.15s ease-out;
+}
+
+/* شريط توزيع الدفع المتعدد المجزأ */
+.pos-split-payment-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 10px;
+  background: #f8fafc;
+  border: 1.5px solid #e2e8f0;
+  border-radius: 10px;
+  transition: all 0.15s ease;
+}
+.pos-split-payment-row:focus-within {
+  border-color: #0d9488;
+  background: #ffffff;
+  box-shadow: 0 0 0 2px rgba(13, 148, 136, 0.15);
+}
+
+
 

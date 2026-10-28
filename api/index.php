@@ -33,6 +33,14 @@ if (str_starts_with($endpoint, 'archive/') || $endpoint === 'archive') {
     exit();
 }
 
+// توجيه مسارات منظومة إدارة المخازن PharmaOS Stock
+if (str_starts_with($endpoint, 'stock/') || $endpoint === 'stock') {
+    require_once __DIR__ . '/stock.php';
+    $sub = str_starts_with($endpoint, 'stock/') ? substr($endpoint, 6) : '';
+    handleStockApi($sub, $method);
+    exit();
+}
+
 // توجيه مسارات محرك المزامنة التزايدية الذرية (Delta Sync & Outbox Engine)
 if ($endpoint === 'sync/push') {
     require_once __DIR__ . '/sync_api.php';

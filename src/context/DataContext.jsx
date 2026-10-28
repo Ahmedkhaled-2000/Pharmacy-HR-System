@@ -9,7 +9,8 @@ import {
   fmt,
   nowTimeStr,
   normalizeState,
-  getEmployeeApprovedLeaves
+  getEmployeeApprovedLeaves,
+  arabicWeekday
 } from '../utils/formatters';
 import {
   getRealDate,
@@ -177,13 +178,27 @@ function detectEntityDeltas(prevState, nextState) {
       const prevReqs = Array.isArray(prevState.requests) ? prevState.requests : [];
       const nextReqs = Array.isArray(nextState.requests) ? nextState.requests : [];
       const prevMap = new Map(prevReqs.map(r => [String(r.id), r]));
-      for (const nextR of nextReqs.slice(0, 50)) {
+      const nextMap = new Map(nextReqs.map(r => [String(r.id), r]));
+      for (const nextR of nextReqs) {
+        if (!nextR) continue;
         const id = String(nextR.id);
         const prevR = prevMap.get(id);
         if (!prevR) {
           deltas.push({ entityType: 'request', entityId: id, data: nextR, action: 'create' });
-        } else if (prevR.status !== nextR.status || prevR.adminApproved !== nextR.adminApproved || prevR.updatedAt !== nextR.updatedAt) {
+        } else if (
+          prevR.status !== nextR.status ||
+          prevR.adminApproved !== nextR.adminApproved ||
+          prevR.branchApproved !== nextR.branchApproved ||
+          prevR.approvedAt !== nextR.approvedAt ||
+          prevR.rejectedAt !== nextR.rejectedAt ||
+          prevR.updatedAt !== nextR.updatedAt
+        ) {
           deltas.push({ entityType: 'request', entityId: id, data: nextR, action: 'update' });
+        }
+      }
+      for (const [id] of prevMap.entries()) {
+        if (!nextMap.has(id)) {
+          deltas.push({ entityType: 'request', entityId: id, action: 'delete' });
         }
       }
     }
@@ -1475,6 +1490,14 @@ export function DataProvider({ children, showToast = () => {} }) {
       if (hireDate && dateStr < hireDate) continue;
       const daySchedule = getEmployeeDaySchedule(empIdStr, dateStr, state);
       if (!daySchedule || daySchedule.type === 'off' || daySchedule.isOff || daySchedule.variable || daySchedule.isVariable) continue;
+
+      const dayName = arabicWeekday(dateStr);
+      const isProfileRest = (
+        (Array.isArray(emp?.weeklyRestDays) && emp.weeklyRestDays.some((d) => String(d).trim().replace(/[إأآ]/g, 'ا') === dayName.replace(/[إأآ]/g, 'ا'))) ||
+        (Array.isArray(emp?.weekly_off_days) && emp.weekly_off_days.some((d) => String(d).trim().replace(/[إأآ]/g, 'ا') === dayName.replace(/[إأآ]/g, 'ا'))) ||
+        (Array.isArray(emp?.offDays) && emp.offDays.some((d) => String(d).trim().replace(/[إأآ]/g, 'ا') === dayName.replace(/[إأآ]/g, 'ا')))
+      );
+      if (isProfileRest) continue;
       const hasShift = (state.shifts || []).some(s => {
         if (!s || s.date !== dateStr) return false;
         if (s.isCancelled || s.status === 'cancelled' || s.isRejectedPhoto || s.status === 'rejected_photo') return false;

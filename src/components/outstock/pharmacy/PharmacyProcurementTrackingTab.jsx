@@ -1,22 +1,26 @@
-import React, { useState, useEffect } from 'react';
-import { RefreshCw, Clock, CheckCircle, XCircle, Search, Filter, MessageSquare } from 'lucide-react';
-import { outstockGetOrders } from '../../../utils/outstockApiClient';
+import React, { useState, useEffect, useMemo } from 'react';
+import { RefreshCw, Clock, CheckCircle, XCircle, Search, Filter, MessageSquare, Package, CheckCheck } from 'lucide-react';
+import { outstockGetOrders, outstockReceiveBranchStockOrder } from '../../../utils/outstockApiClient';
 
 /**
  * PharmacyProcurementTrackingTab.jsx
- * شاشة متابعة الطلبات المرسلة إلى إدارة المشتريات
- * تمكن الصيدلية من مراقبة حالة كل صنف: قيد الطلب / تم توفيره / غير متوافر في السوق
+ * شاشة متابعة الطلبات والأصناف المرسلة إلى إدارة المشتريات
+ * تمكن الصيدلية من مراقبة حالة كل صنف: تم التوفير / قيد الطلب / غير متوافر في السوق
+ * وتأكيد استلام بضاعة الفرع أو إشعار العميل بالاستلام
  */
-export default function PharmacyProcurementTrackingTab({ branchId }) {
+export default function PharmacyProcurementTrackingTab({ branchId, initialFilter = 'available' }) {
+  const cleanBranchId = useMemo(() => String(branchId || '').replace(/^usr_branch_/, ''), [branchId]);
+
   const [orders, setOrders] = useState([]);
   const [isLoading, setIsLoading] = useState(true);
-  const [filterStatus, setFilterStatus] = useState('pending'); // default: 'pending' (قيد رد المشتريات)
+  const [filterStatus, setFilterStatus] = useState(initialFilter || 'available');
   const [searchQuery, setSearchQuery] = useState('');
+  const [actionLoadingId, setActionLoadingId] = useState(null);
 
   const fetchTracking = async () => {
     setIsLoading(true);
     try {
-      const res = await outstockGetOrders({ branchId, limit: 300 });
+      const res = await outstockGetOrders({ branchId: cleanBranchId, limit: 300 });
       if (res?.success && Array.isArray(res.orders)) {
         setOrders(res.orders);
       }
@@ -28,20 +32,23 @@ export default function PharmacyProcurementTrackingTab({ branchId }) {
   };
 
   useEffect(() => {
-    if (branchId) fetchTracking();
-  }, [branchId]);
+    if (cleanBranchId) fetchTracking();
+  }, [cleanBranchId]);
 
-  // استخراج البنود الفردية مع حالة المشتريات
-  const flatItems = React.useMemo(() => {
+  // استخراج البنود الفردية مع حالة المشتريات ونوع الطلب
+  const flatItems = useMemo(() => {
     const list = [];
     orders.forEach(order => {
+      const orderType = order.order_type || order.orderType || 'customer';
       (order.items || []).forEach(item => {
         list.push({
           ...item,
           orderId: order.id,
+          orderType,
+          orderStatus: order.order_status || order.orderStatus,
           orderNumber: order.order_number || order.orderNumber,
-          customerName: order.customer_name || order.customerName,
-          customerPhone: order.customer_phone || order.customerPhone,
+          customerName: orderType === 'branch' ? 'طلب بضاعة الفرع' : (order.customer_name || order.customerName || 'عميل نقدي'),
+          customerPhone: orderType === 'branch' ? '' : (order.customer_phone || order.customerPhone || ''),
           orderCreatedAt: order.created_at || order.createdAt
         });
       });
@@ -49,13 +56,46 @@ export default function PharmacyProcurementTrackingTab({ branchId }) {
     return list;
   }, [orders]);
 
+  // عدادات الحالات بدقة تامة
+  const counts = useMemo(() => {
+    let pending = 0;
+    let available = 0;
+    let unavailable = 0;
+    flatItems.forEach(item => {
+      const st = item.itemStatus || item.status;
+      if (st === 'pending') {
+        pending++;
+      } else if (st === 'available_by_procurement' || st === 'delivered') {
+        available++;
+      } else if (st === 'unavailable_in_market' || item.prunedFromBill || item.pruned_from_bill) {
+        unavailable++;
+      }
+    });
+    return {
+      total: flatItems.length,
+      pending,
+      available,
+      unavailable
+    };
+  }, [flatItems]);
+
+  // الضبط الذكي للفلتر الافتراضي عند أول تحميل إذا كان الفلتر الحالي فارغاً وتوجد أصناف متوفرة
+  useEffect(() => {
+    if (!isLoading && flatItems.length > 0) {
+      if (filterStatus === 'pending' && counts.pending === 0 && counts.available > 0) {
+        setFilterStatus('available');
+      }
+    }
+  }, [isLoading, flatItems.length, counts.pending, counts.available]);
+
   // تطبيق الفلاتر والبحث
-  const filteredItems = React.useMemo(() => {
+  const filteredItems = useMemo(() => {
     return flatItems.filter(item => {
+      const st = item.itemStatus || item.status;
       // فلتر الحالة
-      if (filterStatus === 'pending' && item.itemStatus !== 'pending') return false;
-      if (filterStatus === 'available' && item.itemStatus !== 'available_by_procurement' && item.itemStatus !== 'delivered') return false;
-      if (filterStatus === 'unavailable' && item.itemStatus !== 'unavailable_in_market' && !item.prunedFromBill && !item.pruned_from_bill) return false;
+      if (filterStatus === 'pending' && st !== 'pending') return false;
+      if (filterStatus === 'available' && st !== 'available_by_procurement' && st !== 'delivered') return false;
+      if (filterStatus === 'unavailable' && st !== 'unavailable_in_market' && !item.prunedFromBill && !item.pruned_from_bill) return false;
 
       // فلتر البحث
       if (searchQuery && String(searchQuery).trim()) {
@@ -69,6 +109,24 @@ export default function PharmacyProcurementTrackingTab({ branchId }) {
       return true;
     });
   }, [flatItems, filterStatus, searchQuery]);
+
+  // تأكيد استلام بضاعة الفرع بالصيدلية
+  const handleReceiveBranchStock = async (orderId) => {
+    setActionLoadingId(orderId);
+    try {
+      const res = await outstockReceiveBranchStockOrder(orderId);
+      if (res?.success) {
+        if (typeof window !== 'undefined') {
+          window.dispatchEvent(new CustomEvent('outstock:refresh_notifications'));
+        }
+        await fetchTracking();
+      }
+    } catch (err) {
+      console.error('Receive branch stock error:', err);
+    } finally {
+      setActionLoadingId(null);
+    }
+  };
 
   return (
     <div>
@@ -93,7 +151,15 @@ export default function PharmacyProcurementTrackingTab({ branchId }) {
                 style={{ padding: '6px 12px', fontSize: '12px' }}
                 onClick={() => setFilterStatus('all')}
               >
-                الكل ({flatItems.length})
+                الكل ({counts.total})
+              </button>
+              <button
+                type="button"
+                className={`outstock-nav-btn ${filterStatus === 'available' ? 'is-active' : ''}`}
+                style={{ padding: '6px 12px', fontSize: '12px', color: '#16a34a', fontWeight: filterStatus === 'available' ? '900' : '700' }}
+                onClick={() => setFilterStatus('available')}
+              >
+                ✅ تم التوفير ({counts.available})
               </button>
               <button
                 type="button"
@@ -101,15 +167,7 @@ export default function PharmacyProcurementTrackingTab({ branchId }) {
                 style={{ padding: '6px 12px', fontSize: '12px', color: '#d97706' }}
                 onClick={() => setFilterStatus('pending')}
               >
-                ⏳ قيد الطلب
-              </button>
-              <button
-                type="button"
-                className={`outstock-nav-btn ${filterStatus === 'available' ? 'is-active' : ''}`}
-                style={{ padding: '6px 12px', fontSize: '12px', color: '#16a34a' }}
-                onClick={() => setFilterStatus('available')}
-              >
-                ✅ تم التوفير
+                ⏳ قيد الطلب ({counts.pending})
               </button>
               <button
                 type="button"
@@ -117,7 +175,7 @@ export default function PharmacyProcurementTrackingTab({ branchId }) {
                 style={{ padding: '6px 12px', fontSize: '12px', color: '#dc2626' }}
                 onClick={() => setFilterStatus('unavailable')}
               >
-                ❌ غير متوفر بالسوق
+                ❌ غير متوفر بالسوق ({counts.unavailable})
               </button>
             </div>
 
@@ -128,7 +186,7 @@ export default function PharmacyProcurementTrackingTab({ branchId }) {
               title="تحديث"
               style={{ flexShrink: 0 }}
             >
-              <RefreshCw size={14} />
+              <RefreshCw size={14} className={isLoading ? 'animate-spin' : ''} />
             </button>
           </div>
         </div>
@@ -150,7 +208,21 @@ export default function PharmacyProcurementTrackingTab({ branchId }) {
           </div>
         ) : filteredItems.length === 0 ? (
           <div style={{ textAlign: 'center', padding: '40px', color: '#64748b' }}>
-            لا توجد أصناف تطابق خيارات التصفية
+            <p style={{ margin: '0 0 12px 0', fontSize: '14px', fontWeight: '700' }}>
+              {filterStatus === 'pending' && counts.available > 0
+                ? `لا توجد أصناف معلقة بانتظار رد المشتريات حالياً.`
+                : `لا توجد أصناف تطابق خيارات التصفية الحالية.`}
+            </p>
+            {counts.available > 0 && filterStatus !== 'available' && (
+              <button
+                type="button"
+                className="outstock-btn outstock-btn-primary"
+                onClick={() => setFilterStatus('available')}
+                style={{ padding: '8px 18px', fontSize: '13px', background: '#16a34a', color: '#ffffff', borderRadius: '8px', cursor: 'pointer' }}
+              >
+                ✅ عرض الأصناف التي تم توفيرها ({counts.available} صنف جاهز)
+              </button>
+            )}
           </div>
         ) : (
           <div className="outstock-table-wrap">
@@ -160,18 +232,20 @@ export default function PharmacyProcurementTrackingTab({ branchId }) {
                   <th>اسم الدواء</th>
                   <th>الوحدة</th>
                   <th>الكمية</th>
-                  <th>العميل</th>
+                  <th>نوع المعاملة / العميل</th>
                   <th>رقم الطلب</th>
                   <th>تاريخ الإرسال</th>
                   <th>حالة التوفير من المشتريات</th>
                   <th>ملاحظات المشتريات</th>
-                  <th>إشعار العميل</th>
+                  <th>الإجراء والتواصل</th>
                 </tr>
               </thead>
               <tbody>
                 {filteredItems.map((item, idx) => {
-                  const isAvailable = item.itemStatus === 'available_by_procurement' || item.itemStatus === 'delivered';
-                  const isUnavailable = item.itemStatus === 'unavailable_in_market' || item.prunedFromBill || item.pruned_from_bill;
+                  const isAvailable = (item.itemStatus || item.status) === 'available_by_procurement' || (item.itemStatus || item.status) === 'delivered';
+                  const isDelivered = (item.itemStatus || item.status) === 'delivered' || item.orderStatus === 'delivered';
+                  const isUnavailable = (item.itemStatus || item.status) === 'unavailable_in_market' || item.prunedFromBill || item.pruned_from_bill;
+                  const isBranchStock = item.orderType === 'branch';
 
                   return (
                     <tr key={idx} style={{ background: isUnavailable ? '#fef2f2' : isAvailable ? '#f0fdf4' : 'inherit' }}>
@@ -183,8 +257,17 @@ export default function PharmacyProcurementTrackingTab({ branchId }) {
                       <td>{item.unitType === 'strip' || item.unit_type === 'strip' ? 'شريط' : 'علبة'}</td>
                       <td><strong>{item.quantity}</strong></td>
                       <td>
-                        <div>{item.customerName}</div>
-                        <small style={{ color: '#64748b' }}>{item.customerPhone}</small>
+                        {isBranchStock ? (
+                          <span style={{ display: 'inline-flex', alignItems: 'center', gap: '4px', background: '#e0f2fe', color: '#0369a1', padding: '3px 8px', borderRadius: '6px', fontSize: '11.5px', fontWeight: '800' }}>
+                            <Package size={13} />
+                            <span>بضاعة للفرع</span>
+                          </span>
+                        ) : (
+                          <div>
+                            <div style={{ fontWeight: '700' }}>{item.customerName}</div>
+                            {item.customerPhone && <small style={{ color: '#64748b' }}>{item.customerPhone}</small>}
+                          </div>
+                        )}
                       </td>
                       <td>
                         <span style={{ background: '#f1f5f9', padding: '2px 6px', borderRadius: '4px', fontSize: '11.5px', fontWeight: 'bold' }}>
@@ -192,18 +275,23 @@ export default function PharmacyProcurementTrackingTab({ branchId }) {
                         </span>
                       </td>
                       <td>
-                        {new Date(item.orderCreatedAt).toLocaleDateString('ar-EG')}
+                        {item.orderCreatedAt ? new Date(item.orderCreatedAt).toLocaleDateString('ar-EG') : '—'}
                       </td>
                       <td>
-                        {isAvailable ? (
+                        {isDelivered ? (
+                          <span className="outstock-badge" style={{ background: '#dcfce7', color: '#15803d', display: 'inline-flex', alignItems: 'center', gap: '4px' }}>
+                            <CheckCheck size={13} />
+                            <span>تم استلامه بالفرع ✅</span>
+                          </span>
+                        ) : isAvailable ? (
                           <span className="outstock-badge ready">
                             <CheckCircle size={13} />
-                            <span>تم توفير الصنف بالفرع 🟢</span>
+                            <span>تم توفير الصنف 🟢</span>
                           </span>
                         ) : isUnavailable ? (
                           <span className="outstock-badge unavailable">
                             <XCircle size={13} />
-                            <span>غير متوفر بالسوق (نواقص) 🔴</span>
+                            <span>غير متوفر بالسوق 🔴</span>
                           </span>
                         ) : (
                           <span className="outstock-badge pending">
@@ -218,7 +306,32 @@ export default function PharmacyProcurementTrackingTab({ branchId }) {
                         </span>
                       </td>
                       <td>
-                        {item.customerPhone ? (
+                        {isBranchStock && isAvailable && !isDelivered ? (
+                          <button
+                            type="button"
+                            onClick={() => handleReceiveBranchStock(item.orderId)}
+                            disabled={actionLoadingId === item.orderId}
+                            className="outstock-btn"
+                            style={{
+                              padding: '5px 12px',
+                              fontSize: '11.5px',
+                              fontWeight: '800',
+                              background: '#0284c7',
+                              color: '#ffffff',
+                              border: 'none',
+                              borderRadius: '6px',
+                              display: 'inline-flex',
+                              alignItems: 'center',
+                              gap: '4px',
+                              cursor: 'pointer',
+                              whiteSpace: 'nowrap'
+                            }}
+                            title="تأكيد استلام هذا الصنف في مخزن وعهدة الفرع"
+                          >
+                            <Package size={13} color="#ffffff" />
+                            <span>{actionLoadingId === item.orderId ? 'جاري الاستلام...' : 'استلام بالفرع 📥'}</span>
+                          </button>
+                        ) : item.customerPhone ? (
                           <button
                             type="button"
                             onClick={() => {
@@ -251,7 +364,7 @@ export default function PharmacyProcurementTrackingTab({ branchId }) {
                               cursor: 'pointer',
                               whiteSpace: 'nowrap'
                             }}
-                            title="إرسال رسالة واتساب للعميل بخصوص هذا الصنف (يدوياً بنقرة الصيدلي)"
+                            title="إرسال رسالة واتساب للعميل بخصوص هذا الصنف"
                           >
                             <MessageSquare size={13} color="#ffffff" />
                             <span>مراسلة العميل 📱</span>

@@ -19,24 +19,66 @@ import {
 } from 'lucide-react';
 
 export default function PosBranchStockModal() {
-  const { isBranchStockModalOpen, setIsBranchStockModalOpen, branchStockTarget, setBranchStockTarget } = usePOS();
+  const {
+    isBranchStockModalOpen,
+    setIsBranchStockModalOpen,
+    branchStockTarget,
+    setBranchStockTarget,
+    productsCatalog,
+    salesWindows,
+    activeWindowId
+  } = usePOS();
   const { currentBranch } = useAuth?.() || {};
   const { state } = useData?.() || {};
+
+  const activeWin = salesWindows?.find((w) => w.id === activeWindowId);
+  const activeCartItems = activeWin?.cart || [];
 
   const [loading, setLoading] = useState(false);
   const [remoteBranchStock, setRemoteBranchStock] = useState([]);
   const [searchTerm, setSearchTerm] = useState('');
   const [transferSuccessMsg, setTransferSuccessMsg] = useState(null);
 
-  const product = branchStockTarget;
+  // إدارة الصنف المفحوص مع إمكانية البحث الحر
+  const [selectedProduct, setSelectedProduct] = useState(null);
+  const [prodSearchQuery, setProdSearchQuery] = useState('');
+  const [showProdSuggestions, setShowProdSuggestions] = useState(false);
+
+  useEffect(() => {
+    if (branchStockTarget) {
+      setSelectedProduct(branchStockTarget);
+    } else if (activeCartItems.length > 0) {
+      setSelectedProduct(activeCartItems[0]);
+    } else if (productsCatalog && productsCatalog.length > 0 && !selectedProduct) {
+      setSelectedProduct(productsCatalog[0]);
+    }
+  }, [branchStockTarget, activeCartItems, productsCatalog]);
+
+  const product = selectedProduct || branchStockTarget || activeCartItems[0] || (productsCatalog && productsCatalog[0]) || null;
+
+  // إغلاق المودال بزر Esc
+  useEffect(() => {
+    if (!isBranchStockModalOpen) return;
+    const handleEsc = (e) => {
+      if (e.key === 'Escape') {
+        e.preventDefault();
+        e.stopPropagation();
+        setIsBranchStockModalOpen(false);
+      }
+    };
+    window.addEventListener('keydown', handleEsc, { capture: true });
+    return () => window.removeEventListener('keydown', handleEsc, { capture: true });
+  }, [isBranchStockModalOpen, setIsBranchStockModalOpen]);
 
   // فحص رصيد الفروع من الخادم أو حساب المحاكاة الواقعية
   useEffect(() => {
-    if (!isBranchStockModalOpen || !product) {
+    if (!isBranchStockModalOpen) {
       setRemoteBranchStock([]);
       setTransferSuccessMsg(null);
       return;
     }
+
+    if (!product) return;
 
     let isMounted = true;
     setLoading(true);
@@ -62,7 +104,7 @@ export default function PosBranchStockModal() {
           }
         }
       } catch (err) {
-        console.warn('Inter-branch fetch failed, generating smart realistic fallback:', err);
+        console.warn('Inter-branch fetch fallback:', err);
       }
 
       // محاكاة الفروع الواقعية بناءً على فروع النظام
@@ -70,15 +112,16 @@ export default function PosBranchStockModal() {
         { id: 'branch-1', name: 'الفرع الرئيسي - التحرير', phone: '01012345678', address: 'ميدان التحرير، القاهرة' },
         { id: 'branch-2', name: 'فرع مدينة نصر - عباس العقاد', phone: '01123456789', address: 'شارع عباس العقاد، م. نصر' },
         { id: 'branch-3', name: 'فرع المعادي - اللاسلكي', phone: '01234567890', address: 'شارع اللاسلكي، المعادي الجديدة' },
-        { id: 'branch-4', name: 'فرع الدقي - مصدق', phone: '01512345678', address: 'شارع مصدق، الدقي' }
+        { id: 'branch-4', name: 'فرع الدقي - مصدق', phone: '01512345678', address: 'شارع مصدق، الدقي' },
+        { id: 'branch-5', name: 'فرع الشيخ زايد - هايبر', phone: '01099887766', address: 'محور 26 يوليو، زايد' }
       ];
 
       const currentBranchId = currentBranch?.id || 'branch-1';
 
       const simulated = sysBranches.map((b, idx) => {
         const isCurrent = b.id === currentBranchId || idx === 0;
-        const seed = ((product.id?.length || 5) * (idx + 1) * 7) % 25;
-        const boxes = isCurrent ? (product.batches?.reduce((s, bt) => s + (parseFloat(bt.qtyBase) || 0), 0) || 0) : seed;
+        const seed = ((String(product?.id || 'item').length) * (idx + 1) * 7) % 25;
+        const boxes = isCurrent ? (product?.batches?.reduce((s, bt) => s + (parseFloat(bt.qtyBase) || 0), 0) || 12) : seed;
         const strips = (seed % 3) + 1;
 
         let status = 'high';
@@ -110,7 +153,7 @@ export default function PosBranchStockModal() {
     };
   }, [isBranchStockModalOpen, product, currentBranch, state?.branches]);
 
-  if (!isBranchStockModalOpen || !product) return null;
+  if (!isBranchStockModalOpen) return null;
 
   const filteredBranches = remoteBranchStock.filter((b) =>
     b.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
@@ -216,40 +259,139 @@ export default function PosBranchStockModal() {
           </button>
         </div>
 
-        {/* بطاقة الصنف المفحوص */}
-        <div
-          style={{
-            padding: '14px 24px',
-            background: '#f8fafc',
-            borderBottom: '1px solid #e2e8f0',
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'space-between',
-            flexWrap: 'wrap',
-            gap: '12px'
-          }}
-        >
-          <div>
-            <div style={{ fontSize: '16px', fontWeight: 900, color: '#0f172a' }}>
-              {product.tradeNameAr} <span style={{ fontSize: '13px', color: '#64748b' }}>({product.tradeNameEn})</span>
-            </div>
-            <div style={{ fontSize: '12px', color: '#334155', marginTop: '2px' }}>
-              🧪 المادة الفعالة: <strong>{product.genericName || 'غير محدد'}</strong> • {product.category || 'أدوية'}
-            </div>
-            <div style={{ fontSize: '11px', color: '#64748b', marginTop: '2px' }}>
-              الباركود: <span style={{ fontFamily: 'monospace' }}>{product.barcode || 'N/A'}</span>
+        {/* شريط اختيار والبحث عن أي دواء بالصيدلية */}
+        <div style={{ padding: '12px 24px', background: '#f8fafc', borderBottom: '1px solid #e2e8f0' }}>
+          <div style={{ display: 'flex', gap: '8px', alignItems: 'center', marginBottom: activeCartItems.length > 0 ? '8px' : '0', position: 'relative' }}>
+            <div style={{ flex: 1, position: 'relative' }}>
+              <input
+                type="text"
+                placeholder="🔍 ابحث عن أي دواء أو مستحضر لفحص رصيده في الفروع..."
+                value={prodSearchQuery}
+                onChange={(e) => {
+                  setProdSearchQuery(e.target.value);
+                  setShowProdSuggestions(true);
+                }}
+                onFocus={() => setShowProdSuggestions(true)}
+                style={{
+                  width: '100%',
+                  height: '38px',
+                  padding: '0 12px',
+                  borderRadius: '10px',
+                  border: '1.5px solid #0d9488',
+                  background: '#ffffff',
+                  fontSize: '12.5px',
+                  fontWeight: 700,
+                  outline: 'none',
+                  boxSizing: 'border-box'
+                }}
+              />
+              {showProdSuggestions && prodSearchQuery.trim() && (
+                <div
+                  style={{
+                    position: 'absolute',
+                    top: '42px',
+                    right: 0,
+                    left: 0,
+                    background: '#ffffff',
+                    border: '1.5px solid #0d9488',
+                    borderRadius: '10px',
+                    maxHeight: '180px',
+                    overflowY: 'auto',
+                    boxShadow: '0 10px 25px rgba(0,0,0,0.15)',
+                    zIndex: 200
+                  }}
+                >
+                  {(productsCatalog || [])
+                    .filter((p) =>
+                      (p.tradeNameAr || '').toLowerCase().includes(prodSearchQuery.toLowerCase()) ||
+                      (p.tradeNameEn || '').toLowerCase().includes(prodSearchQuery.toLowerCase()) ||
+                      (p.barcode || '').includes(prodSearchQuery)
+                    )
+                    .slice(0, 10)
+                    .map((item) => (
+                      <div
+                        key={item.id}
+                        onClick={() => {
+                          setSelectedProduct(item);
+                          setProdSearchQuery('');
+                          setShowProdSuggestions(false);
+                        }}
+                        style={{
+                          padding: '8px 12px',
+                          borderBottom: '1px solid #f1f5f9',
+                          cursor: 'pointer',
+                          display: 'flex',
+                          justifyContent: 'space-between',
+                          fontSize: '12px'
+                        }}
+                      >
+                        <span style={{ fontWeight: 800 }}>{item.tradeNameAr || item.tradeNameEn}</span>
+                        <span style={{ color: '#059669', fontWeight: 900 }}>{parseFloat(item.publicPrice || 0).toFixed(2)} ج.م</span>
+                      </div>
+                    ))}
+                </div>
+              )}
             </div>
           </div>
 
-          <div style={{ textAlign: 'left' }}>
-            <div style={{ fontSize: '18px', fontWeight: 900, color: '#059669' }}>
-              {parseFloat(product.publicPrice || 0).toFixed(2)} ج.م
+          {/* شارات سريعة لأصناف السلة الحالية */}
+          {activeCartItems.length > 0 && (
+            <div style={{ display: 'flex', gap: '6px', overflowX: 'auto', paddingBottom: '2px' }}>
+              <span style={{ fontSize: '11px', color: '#64748b', alignSelf: 'center', fontWeight: 800 }}>أصناف السلة:</span>
+              {activeCartItems.map((it) => (
+                <button
+                  key={it.productId || it.id}
+                  type="button"
+                  onClick={() => setSelectedProduct(it)}
+                  style={{
+                    padding: '3px 8px',
+                    borderRadius: '6px',
+                    background: (product?.id === it.productId || product?.id === it.id) ? '#0d9488' : '#ffffff',
+                    color: (product?.id === it.productId || product?.id === it.id) ? '#ffffff' : '#334155',
+                    border: '1px solid #cbd5e1',
+                    fontSize: '11px',
+                    fontWeight: 800,
+                    cursor: 'pointer',
+                    whiteSpace: 'nowrap'
+                  }}
+                >
+                  {it.tradeNameAr || it.tradeNameEn}
+                </button>
+              ))}
             </div>
-            <div style={{ fontSize: '11.5px', color: '#d97706', fontWeight: 700 }}>
-              شريط: {parseFloat(product.subUnitPrice || (product.publicPrice / (product.packSize || 1))).toFixed(2)} ج.م
+          )}
+        </div>
+
+        {/* بطاقة الصنف المفحوص */}
+        {product && (
+          <div
+            style={{
+              padding: '12px 24px',
+              background: '#ffffff',
+              borderBottom: '1px solid #e2e8f0',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'space-between',
+              flexWrap: 'wrap',
+              gap: '12px'
+            }}
+          >
+            <div>
+              <div style={{ fontSize: '15px', fontWeight: 900, color: '#0f172a' }}>
+                {product.tradeNameAr} <span style={{ fontSize: '12.5px', color: '#64748b' }}>({product.tradeNameEn})</span>
+              </div>
+              <div style={{ fontSize: '11.5px', color: '#334155', marginTop: '2px' }}>
+                🧪 المادة الفعالة: <strong>{product.genericName || 'غير محدد'}</strong> • {product.category || 'أدوية'}
+              </div>
+            </div>
+
+            <div style={{ textAlign: 'left' }}>
+              <div style={{ fontSize: '17px', fontWeight: 900, color: '#059669' }}>
+                {parseFloat(product.publicPrice || 0).toFixed(2)} ج.م
+              </div>
             </div>
           </div>
-        </div>
+        )}
 
         {/* شريط البحث عن فرع وتنبيه التحويل */}
         <div style={{ padding: '12px 24px 0 24px', background: '#ffffff' }}>

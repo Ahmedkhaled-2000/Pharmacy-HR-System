@@ -529,10 +529,10 @@ export function normalizePosSearchText(str) {
 }
 
 export const INVOICE_TYPES = {
-  otc: { id: 'otc', label: 'OTC (لا وصفية)', icon: '🟢', color: '#10b981', badgeClass: 'pos-badge-otc', desc: 'أدوية ومستلزمات البيع المباشر' },
-  rx: { id: 'rx', label: 'روشتة طبية (Rx)', icon: '💊', color: '#0ea5e9', badgeClass: 'pos-badge-rx', desc: 'صرف وصفة وتذكرة طبية معتمدة' },
-  customer_order: { id: 'customer_order', label: 'طلب عميل (خاص)', icon: '📋', color: '#f59e0b', badgeClass: 'pos-badge-order', desc: 'توفير طلب ونواقص مخصوصة لعميل' },
-  delivery: { id: 'delivery', label: 'توصيل منازل (دليفري)', icon: '🛵', color: '#8b5cf6', badgeClass: 'pos-badge-delivery', desc: 'فاتورة مرسلة مع طيار التوصيل' }
+  otc: { id: 'otc', label: 'OTC', icon: '🟢', color: '#10b981', badgeClass: 'pos-badge-otc', desc: 'أدوية ومستلزمات البيع المباشر' },
+  rx: { id: 'rx', label: 'روشتة', icon: '💊', color: '#0ea5e9', badgeClass: 'pos-badge-rx', desc: 'صرف وصفة وتذكرة طبية معتمدة' },
+  customer_order: { id: 'customer_order', label: 'طلب عميل', icon: '📋', color: '#f59e0b', badgeClass: 'pos-badge-order', desc: 'توفير طلب ونواقص مخصوصة لعميل' },
+  delivery: { id: 'delivery', label: 'توصيل', icon: '🛵', color: '#8b5cf6', badgeClass: 'pos-badge-delivery', desc: 'فاتورة مرسلة مع طيار التوصيل' }
 };
 
 // قاموس الأعراض والمؤشرات الدوائية واللهجة المصرية للبحث الذكي السريري
@@ -601,14 +601,50 @@ const INDICATION_KEYWORDS = {
 /**
  * 4. البحث الدوائي الفوري بالباركود أو الاسم العربي أو الإنجليزي أو المادة الفعالة أو العرض الطبي
  */
+/**
+ * دالة حساب مسافة التعديل (Levenshtein Distance) للتسامح مع الأخطاء الإملائية
+ */
+function calculateLevenshtein(a, b) {
+  if (!a || !b) return (a || '').length + (b || '').length;
+  const s1 = a.toLowerCase();
+  const s2 = b.toLowerCase();
+  if (s1 === s2) return 0;
+  if (s1.length > 30 || s2.length > 30) return 99; // حماية الأداء للكلمات الطويلة جداً
+
+  const row = [];
+  for (let j = 0; j <= s2.length; j++) row[j] = j;
+
+  for (let i = 1; i <= s1.length; i++) {
+    let prev = i;
+    for (let j = 1; j <= s2.length; j++) {
+      let val;
+      if (s1.charAt(i - 1) === s2.charAt(j - 1)) {
+        val = row[j - 1];
+      } else {
+        val = Math.min(row[j - 1] + 1, prev + 1, row[j] + 1);
+      }
+      row[j - 1] = prev;
+      prev = val;
+    }
+    row[s2.length] = prev;
+  }
+  return row[s2.length];
+}
+
+/**
+ * 4. البحث الدوائي الفوري الذكي بالباركود أو الاسم أو المادة الفعالة مع التسامح الإملائي وترتيب أصناف الفرع أولاً
+ */
 export function searchProducts(catalog, query) {
   if (!query || !query.trim()) return [];
   const cleanQ = normalizePosSearchText(query);
   const rawQ = query.trim().toLowerCase();
+  const qPrefix3 = cleanQ.length >= 3 ? cleanQ.slice(0, 3) : null;
+  const rawPrefix3 = rawQ.length >= 3 ? rawQ.slice(0, 3) : null;
 
   // فحص الكلمات الدلالية للأعراض (صداع، مسكن، ضغط...)
   const matchingIndicationTerms = Object.entries(INDICATION_KEYWORDS)
-    .filter(([key]) => cleanQ.includes(key))
+    .filter(([key]) => cleanQ.includes(key));
+
   const existingIds = new Set((catalog || []).map((p) => p?.id));
   const mergedCatalog = [...(catalog || [])];
   for (const fastItem of PHARMA_FAST_OTC_ITEMS) {
@@ -617,49 +653,112 @@ export function searchProducts(catalog, query) {
     }
   }
 
-  return mergedCatalog.filter((prod) => {
-    if (!prod) return false;
+  const scoredResults = [];
 
-    // تطابق الباركود المباشر الدقيق (الأولوية الأولى لمسح الباركود)
+  for (const prod of mergedCatalog) {
+    if (!prod) continue;
+
+    // حساب الرصيد الفعلي المتوفر في الفرع الحالي
+    const branchStockCount = (prod.batches || []).reduce((sum, b) => sum + (parseFloat(b.qtyBase) || 0), 0) +
+      (parseFloat(prod.stock) || 0) + (parseFloat(prod.branchStock) || 0);
+    const hasBranchStock = branchStockCount > 0;
+
+    let score = 0;
+    let matchFound = false;
+
+    // 1. تطابق الباركود المباشر الدقيق (الأولوية القصوى المطلقة)
     if (prod.barcode === rawQ || (prod.barcodes && prod.barcodes.includes(rawQ))) {
-      return true;
+      score += 2000;
+      matchFound = true;
+    } else if (prod.barcode && rawQ.length > 7 && (rawQ.includes(prod.barcode) || prod.barcode.includes(rawQ))) {
+      score += 1500;
+      matchFound = true;
     }
 
-    // فحص الباركود الدولي GS1 DataMatrix الجزئي
-    if (prod.barcode && rawQ.length > 8 && (rawQ.includes(prod.barcode) || prod.barcode.includes(rawQ))) {
-      return true;
-    }
-
-    // تطابق الاسم التجاري العربي
     const normAr = normalizePosSearchText(prod.tradeNameAr);
-    if (normAr.includes(cleanQ)) return true;
-
-    // تطابق الاسم التجاري الإنجليزي
     const normEn = (prod.tradeNameEn || '').toLowerCase();
-    if (normEn.includes(rawQ)) return true;
-
-    // تطابق المادة الفعالة
     const normGen = normalizePosSearchText(prod.genericName);
-    if (normGen.includes(cleanQ) || (prod.genericName || '').toLowerCase().includes(rawQ)) {
-      return true;
+    const rawGen = (prod.genericName || '').toLowerCase();
+
+    // 2. تطابق مباشر بالاسم العربي أو الإنجليزي
+    if (normAr === cleanQ || normEn === rawQ) {
+      score += 1000;
+      matchFound = true;
+    } else if (normAr.startsWith(cleanQ) || normEn.startsWith(rawQ)) {
+      score += 600;
+      matchFound = true;
+    } else if (normAr.includes(cleanQ) || normEn.includes(rawQ)) {
+      score += 400;
+      matchFound = true;
     }
 
-    // تطابق الشركة المصنعة
-    if ((prod.manufacturer || '').toLowerCase().includes(rawQ)) return true;
+    // 3. تطابق المادة الفعالة
+    if (normGen.includes(cleanQ) || rawGen.includes(rawQ)) {
+      score += 300;
+      matchFound = true;
+    }
 
-    // تطابق فئة الدواء أو القسم
-    if (prod.category && normalizePosSearchText(prod.category).includes(cleanQ)) return true;
+    // 4. تطابق بادئة أول 3 حروف (3-Letter Prefix Trigger)
+    if (!matchFound && qPrefix3) {
+      const arTokens = normAr.split(/\s+/);
+      const enTokens = normEn.split(/\s+/);
+      const genTokens = rawGen.split(/\s+/);
 
-    // تطابق الأعراض والمؤشرات الدلالية
-    if (matchingIndicationTerms.length > 0) {
-      const pCombined = `${prod.tradeNameAr} ${prod.tradeNameEn} ${prod.genericName}`.toLowerCase();
-      if (matchingIndicationTerms.some((t) => pCombined.includes(t.toLowerCase()))) {
-        return true;
+      if (
+        arTokens.some((t) => t.startsWith(qPrefix3)) ||
+        enTokens.some((t) => t.startsWith(rawPrefix3)) ||
+        genTokens.some((t) => t.startsWith(rawPrefix3))
+      ) {
+        score += 200;
+        matchFound = true;
       }
     }
 
-    return false;
-  });
+    // 5. التسامح الإملائي الفائق (Typo Tolerance & Fuzzy Search) للكلمات من 3 حروف فأكثر
+    if (!matchFound && cleanQ.length >= 3) {
+      const arTokens = normAr.split(/\s+/);
+      const enTokens = normEn.split(/\s+/);
+
+      // فحص قرب المسافة لأي كلمة من كلمات اسم الدواء
+      const maxAllowedDist = cleanQ.length <= 4 ? 1 : 2;
+      const fuzzyMatchAr = arTokens.some((tok) => Math.abs(tok.length - cleanQ.length) <= 2 && calculateLevenshtein(tok, cleanQ) <= maxAllowedDist);
+      const fuzzyMatchEn = enTokens.some((tok) => Math.abs(tok.length - rawQ.length) <= 2 && calculateLevenshtein(tok, rawQ) <= maxAllowedDist);
+
+      if (fuzzyMatchAr || fuzzyMatchEn) {
+        score += 150;
+        matchFound = true;
+      }
+    }
+
+    // 6. تطابق الأعراض والمؤشرات الدلالية
+    if (matchingIndicationTerms.length > 0) {
+      const pCombined = `${prod.tradeNameAr} ${prod.tradeNameEn} ${prod.genericName}`.toLowerCase();
+      if (matchingIndicationTerms.some(([key, terms]) => terms.some((t) => pCombined.includes(t.toLowerCase())))) {
+        score += 120;
+        matchFound = true;
+      }
+    }
+
+    // 7. مضاعفة النقاط للأصناف المتوفرة بالفرع (Branch Inventory Prioritization)
+    // هذا يضمن صعود الأصناف الموجودة على رفوف الفرع الحالي إلى مقدمة نتائج البحث
+    if (hasBranchStock) {
+      score += 800; // أسبقية ساحقة للأصناف المتوفرة برصيد فعلي بالفرع
+    }
+
+    if (matchFound) {
+      scoredResults.push({
+        ...prod,
+        branchStockCount,
+        hasBranchStock,
+        searchScore: score
+      });
+    }
+  }
+
+  // ترتيب النتائج تنازلياً حسب درجة المطابقة وأسبقية مخزون الفرع
+  scoredResults.sort((a, b) => b.searchScore - a.searchScore);
+
+  return scoredResults;
 }
 
 /**

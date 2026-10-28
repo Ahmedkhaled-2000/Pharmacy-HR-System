@@ -42,22 +42,44 @@ export function getItemKey(item, fallbackPrefix = 'item') {
 // استخراج أحدث وقت تعديل للعنصر
 export function getItemTime(item) {
   if (!item) return 0;
-  const timeVal =
-    item.updatedAt ||
-    item.updated_at ||
-    item.reinstatedAt ||
-    item.terminatedAt ||
-    item.approvedAt ||
-    item.rejectedAt ||
-    item.createdAt ||
-    item.created_at ||
-    item.timestamp ||
-    item.date ||
-    item.driveLastSyncAt;
-  if (!timeVal) return 0;
-  if (typeof timeVal === 'number') return timeVal;
-  const parsed = new Date(timeVal).getTime();
-  return isNaN(parsed) ? 0 : parsed;
+  if (typeof item === 'number') return isNaN(item) ? 0 : item;
+  if (typeof item === 'string') {
+    const p = new Date(item).getTime();
+    return isNaN(p) ? 0 : p;
+  }
+  if (typeof item !== 'object') return 0;
+
+  let maxTime = 0;
+  const timeFields = [
+    item.decided_at,
+    item.approvedAt,
+    item.rejectedAt,
+    item.updatedAt,
+    item.updated_at,
+    item.reinstatedAt,
+    item.terminatedAt,
+    item.completed_at,
+    item.cancelledAt,
+    item.createdAt,
+    item.created_at,
+    item.timestamp,
+    item.date,
+    item.driveLastSyncAt
+  ];
+
+  for (const t of timeFields) {
+    if (!t) continue;
+    if (typeof t === 'number' && !isNaN(t)) {
+      if (t > maxTime) maxTime = t;
+    } else {
+      const parsed = new Date(t).getTime();
+      if (!isNaN(parsed) && parsed > maxTime) {
+        maxTime = parsed;
+      }
+    }
+  }
+
+  return maxTime;
 }
 
 export function toSafeArray(val) {
@@ -579,6 +601,12 @@ function resolveItemConflict(localItem, remoteItem, options = {}) {
 
   // 5. حماية حالة الاعتماد والرفض والسداد للطلبات من الارتداد لحالة معلقة (Terminal Decision Immunity)
   const isReqType = ['req', 'leave', 'loan', 'swap', 'perm', 'res'].includes(options.prefix) ||
+                    String(localItem.id || remoteItem.id || '').startsWith('req_') ||
+                    String(localItem.id || remoteItem.id || '').startsWith('leave_') ||
+                    String(localItem.id || remoteItem.id || '').startsWith('loan_') ||
+                    String(localItem.id || remoteItem.id || '').startsWith('swap_') ||
+                    String(localItem.id || remoteItem.id || '').startsWith('perm_') ||
+                    String(localItem.id || remoteItem.id || '').startsWith('res_') ||
                     Boolean(localItem.requestType || remoteItem.requestType || localItem.employeeId || remoteItem.employeeId);
 
   if (isReqType) {
@@ -604,6 +632,7 @@ function resolveItemConflict(localItem, remoteItem, options = {}) {
       if (localItem.decided_at) mergedBase.decided_at = localItem.decided_at;
       if (localItem.decided_by) mergedBase.decided_by = localItem.decided_by;
       if (localItem.decision_reason) mergedBase.decision_reason = localItem.decision_reason;
+      mergedBase.updatedAt = localItem.updatedAt || localItem.approvedAt || localItem.rejectedAt || new Date().toISOString();
     } else if (isRemoteTerminal && !isLocalTerminal) {
       // السحابة اتخذت قراراً نهائياً بينما المحلي ما زال معلقاً -> قرار السحابة يكسب دائماً
       mergedBase.status = remoteItem.status;
@@ -616,6 +645,7 @@ function resolveItemConflict(localItem, remoteItem, options = {}) {
       if (remoteItem.decided_at) mergedBase.decided_at = remoteItem.decided_at;
       if (remoteItem.decided_by) mergedBase.decided_by = remoteItem.decided_by;
       if (remoteItem.decision_reason) mergedBase.decision_reason = remoteItem.decision_reason;
+      mergedBase.updatedAt = remoteItem.updatedAt || remoteItem.approvedAt || remoteItem.rejectedAt || new Date().toISOString();
     } else if (isLocalTerminal && isRemoteTerminal) {
       // كلاهما قرارات نهائية (مثلاً أحدهما وافق والآخر رفض أو سدد) -> القرار الأحدث زمنياً يحسم
       const lDecidedTime = Math.max(
@@ -641,6 +671,7 @@ function resolveItemConflict(localItem, remoteItem, options = {}) {
       if (winner.decided_at) mergedBase.decided_at = winner.decided_at;
       if (winner.decided_by) mergedBase.decided_by = winner.decided_by;
       if (winner.decision_reason) mergedBase.decision_reason = winner.decision_reason;
+      mergedBase.updatedAt = winner.updatedAt || winner.approvedAt || winner.rejectedAt || new Date().toISOString();
     }
 
     // صيانة السلف والمدفوعات للسلف المعتمدة

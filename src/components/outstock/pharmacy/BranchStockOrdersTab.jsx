@@ -18,7 +18,7 @@ import {
   AlertTriangle,
   MessageSquare
 } from 'lucide-react';
-import { outstockGetOrders } from '../../../utils/outstockApiClient';
+import { outstockGetOrders, outstockReceiveBranchStockOrder } from '../../../utils/outstockApiClient';
 import NewBranchStockOrderModal from './NewBranchStockOrderModal';
 import EmployeeCodeAuthModal from '../common/EmployeeCodeAuthModal';
 
@@ -26,9 +26,9 @@ import EmployeeCodeAuthModal from '../common/EmployeeCodeAuthModal';
  * BranchStockOrdersTab.jsx
  * شاشة طلبات الفرع (نواقص مخزن الفرع الخاص)
  * - عرض وتتبع طلبات بضاعة الفرع المرسلة للمشتريات
- * - فلتر افتراضي: "بانتظار رد المشتريات"
+ * - فلتر افتراضي: "بانتظار رد المشتريات" أو "تم توفيرها بالمشتريات" عند التوافر
  * - فلاتر أخرى: تم إرسالها، تم توفيرها، غير متوفرة، الكل
- * - إشعار وتحديث لحظي عند رد المشتريات
+ * - إشعار وتحديث لحظي عند رد المشتريات وتأكيد استلام البضاعة
  */
 export default function BranchStockOrdersTab({
   branchId,
@@ -36,19 +36,21 @@ export default function BranchStockOrdersTab({
   currentPharmacist = '',
   showToast
 }) {
+  const cleanBranchId = useMemo(() => String(branchId || '').replace(/^usr_branch_/, ''), [branchId]);
   const [orders, setOrders] = useState([]);
   const [isLoading, setIsLoading] = useState(true);
   const [searchQuery, setSearchQuery] = useState('');
-  const [statusFilter, setStatusFilter] = useState('pending_procurement'); // default: بانتظار رد المشتريات
+  const [statusFilter, setStatusFilter] = useState('pending_procurement');
   const [isNewOrderModalOpen, setIsNewOrderModalOpen] = useState(false);
   const [isReceiverAuthOpen, setIsReceiverAuthOpen] = useState(false);
   const [authenticatedReceiver, setAuthenticatedReceiver] = useState(null);
+  const [receivingOrderId, setReceivingOrderId] = useState(null);
 
   const fetchBranchOrders = async () => {
     setIsLoading(true);
     try {
       const res = await outstockGetOrders({
-        branchId,
+        branchId: cleanBranchId,
         orderType: 'branch',
         status: 'all'
       });
@@ -59,6 +61,27 @@ export default function BranchStockOrdersTab({
       console.error('Fetch branch stock orders error:', err);
     } finally {
       setIsLoading(false);
+    }
+  };
+
+  const handleReceiveStock = async (orderId) => {
+    setReceivingOrderId(orderId);
+    try {
+      const res = await outstockReceiveBranchStockOrder(orderId, {
+        receiverName: currentPharmacist || 'الصيدلي المسؤول'
+      });
+      if (res?.success) {
+        if (showToast) showToast('✅ تم تأكيد استلام البضاعة في عهدة الفرع بنجاح 📦', 'success');
+        if (typeof window !== 'undefined') {
+          window.dispatchEvent(new CustomEvent('outstock:refresh_notifications'));
+        }
+        await fetchBranchOrders();
+      }
+    } catch (err) {
+      console.error('Receive branch stock error:', err);
+      if (showToast) showToast('تعذر تأكيد الاستلام', 'error');
+    } finally {
+      setReceivingOrderId(null);
     }
   };
 
@@ -106,8 +129,8 @@ export default function BranchStockOrdersTab({
   // تصفية الطلبات بناءً على الفلتر والبحث
   const getItemStatus = (it) => {
     const s = it?.itemStatus || it?.status;
-    if (s === 'available' || s === 'available_by_procurement') return 'available';
-    if (s === 'unavailable') return 'unavailable';
+    if (s === 'available' || s === 'available_by_procurement' || s === 'delivered') return 'available';
+    if (s === 'unavailable' || s === 'unavailable_in_market' || it?.prunedFromBill || it?.pruned_from_bill) return 'unavailable';
     return 'pending';
   };
 
@@ -599,6 +622,38 @@ export default function BranchStockOrdersTab({
                         )}
                       </span>
                     )}
+
+                    {order.order_status === 'delivered' ? (
+                      <span style={{ background: '#dcfce7', color: '#15803d', padding: '4px 10px', borderRadius: '8px', fontSize: '12px', fontWeight: '800', display: 'inline-flex', alignItems: 'center', gap: '4px' }}>
+                        <CheckCircle size={14} />
+                        تم استلام البضاعة بالفرع ✅
+                      </span>
+                    ) : hasAvailable ? (
+                      <button
+                        type="button"
+                        onClick={() => handleReceiveStock(order.id)}
+                        disabled={receivingOrderId === order.id}
+                        className="outstock-btn"
+                        style={{
+                          background: 'linear-gradient(135deg, #16a34a 0%, #15803d 100%)',
+                          color: '#ffffff',
+                          padding: '6px 14px',
+                          borderRadius: '8px',
+                          fontSize: '12px',
+                          fontWeight: '800',
+                          border: 'none',
+                          cursor: 'pointer',
+                          display: 'inline-flex',
+                          alignItems: 'center',
+                          gap: '6px',
+                          boxShadow: '0 2px 8px rgba(22, 163, 74, 0.25)'
+                        }}
+                        title="تأكيد استلام وتوريد هذه الأصناف في عهدة الفرع"
+                      >
+                        <CheckCircle size={14} color="#ffffff" />
+                        <span>{receivingOrderId === order.id ? 'جاري تأكيد الاستلام...' : 'تأكيد استلام البضاعة بالفرع 📦'}</span>
+                      </button>
+                    ) : null}
                   </div>
                 </div>
 

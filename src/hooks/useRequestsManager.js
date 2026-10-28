@@ -8,7 +8,7 @@ import { applyShiftSwapToRosters, getEmployeeDaySchedule, normalizeSchedule, pro
 import { saveFaceDescriptor, saveHandDescriptor, deleteFaceDescriptor, deleteHandDescriptor } from '../utils/faceStorage';
 import { enqueueRequestDecision } from '../utils/syncEngine';
 import { emitLiveRequestUpdated } from '../utils/socketClient';
-import { broadcastStateChange } from '../utils/offlineSync';
+import { broadcastStateChange, saveStateLocally } from '../utils/offlineSync';
 import { useData } from '../context/DataContext';
 import { useUI } from '../context/UIContext';
 import { sendEmployeeRequestDecisionWhatsApp } from '../utils/whatsappTemplates';
@@ -903,6 +903,7 @@ export function useRequestsManager() {
               employeeName: target.employeeName || empObj?.name || '',
               branchId: targetBranch,
               branchName: targetBName,
+              isUnifiedMaster: !isMultiBranchTarget || !targetBranch,
               month: targetMonthNorm,
               fromDate: target.fromDate,
               toDate: target.toDate,
@@ -1621,16 +1622,20 @@ export function useRequestsManager() {
       }
 
       // 🚀 2. إرسال فوري ومباشر لنقطة نهاية السيرفر الذرية /api/requests/decide لتحديث Redis وقاعدة البيانات (< 30ms)
-      apiSubmitRequestDecision({
-        requestId: target.id,
-        decision: 'approve',
-        newStatus: isFullyApproved ? 'approved' : 'pending_admin',
-        role,
-        approvedAt: nowIso,
-        adminNotes: customData?.adminNotes || target.adminNotes,
-        adjustedBreakHours: customData?.breakHours !== undefined ? finalBreakHours : undefined,
-        request: finalApprovedReq
-      }).catch(err => console.warn('apiSubmitRequestDecision error:', err));
+      try {
+        await apiSubmitRequestDecision({
+          requestId: target.id,
+          decision: 'approve',
+          newStatus: isFullyApproved ? 'approved' : 'pending_admin',
+          role,
+          approvedAt: nowIso,
+          adminNotes: customData?.adminNotes || target.adminNotes,
+          adjustedBreakHours: customData?.breakHours !== undefined ? finalBreakHours : undefined,
+          request: finalApprovedReq
+        }, { keepalive: true });
+      } catch (err) {
+        console.warn('apiSubmitRequestDecision error:', err);
+      }
 
       // 🚀 3. حفظ ذري سريع للشرائح الأساسية (Slices) دفعة واحدة لتثبيت التعديل في السيرفر (< 25ms)
       const slicesToSave = { requests: updatedRequests };
@@ -1655,11 +1660,22 @@ export function useRequestsManager() {
       if (updatedAdjs !== state.adjustments) {
         slicesToSave.adjustments = updatedAdjs;
       }
-      apiSaveSettingsSlice(slicesToSave).catch(err => console.warn('apiSaveSettingsSlice batch error:', err));
+      try {
+        await apiSaveSettingsSlice(slicesToSave, null, { keepalive: true });
+      } catch (err) {
+        console.warn('apiSaveSettingsSlice batch error:', err);
+      }
 
-      // 🚀 4. حفظ الحالة كاملة في الخلفية كصمام أمان شامل
+      // 🚀 4. تثبيت محلي فوري في IndexedDB لمنع الارتداد عند إعادة التحميل
+      try {
+        await saveStateLocally(updatedState);
+      } catch (err) {
+        console.warn('saveStateLocally error:', err);
+      }
+
+      // 🚀 5. حفظ الحالة كاملة مع التلميح الذري
       if (saveState) {
-        saveState(updatedState).catch(err => console.error('Background save error:', err));
+        await saveState(updatedState, { entityType: 'request', entityId: requestId }).catch(err => console.error('Background save error:', err));
       }
       enqueueRequestDecision({
         requestId,
@@ -2207,14 +2223,18 @@ export function useRequestsManager() {
       }
 
       // 🚀 2. إرسال فوري ومباشر لنقطة نهاية السيرفر الذرية /api/requests/decide لتحديث Redis وقاعدة البيانات (< 30ms)
-      apiSubmitRequestDecision({
-        requestId: targetReq?.id || requestId,
-        decision: 'reject',
-        newStatus: 'rejected',
-        role,
-        rejectedAt: nowIso,
-        request: targetReq
-      }).catch(err => console.warn('apiSubmitRequestDecision reject error:', err));
+      try {
+        await apiSubmitRequestDecision({
+          requestId: targetReq?.id || requestId,
+          decision: 'reject',
+          newStatus: 'rejected',
+          role,
+          rejectedAt: nowIso,
+          request: targetReq
+        }, { keepalive: true });
+      } catch (err) {
+        console.warn('apiSubmitRequestDecision reject error:', err);
+      }
 
       // 🚀 3. حفظ ذري سريع للشرائح الأساسية (Slices) دفعة واحدة لتثبيت التعديل في السيرفر (< 25ms)
       const slicesToSave = { requests: updatedRequests };
@@ -2233,11 +2253,22 @@ export function useRequestsManager() {
       if (updatedShifts !== state.shifts) {
         slicesToSave.shifts = updatedShifts;
       }
-      apiSaveSettingsSlice(slicesToSave).catch(err => console.warn('apiSaveSettingsSlice reject batch error:', err));
+      try {
+        await apiSaveSettingsSlice(slicesToSave, null, { keepalive: true });
+      } catch (err) {
+        console.warn('apiSaveSettingsSlice reject batch error:', err);
+      }
 
-      // 🚀 4. حفظ الحالة كاملة في الخلفية كصمام أمان شامل
+      // 🚀 4. تثبيت محلي فوري في IndexedDB لمنع الارتداد عند إعادة التحميل
+      try {
+        await saveStateLocally(updatedState);
+      } catch (err) {
+        console.warn('saveStateLocally reject error:', err);
+      }
+
+      // 🚀 5. حفظ الحالة كاملة مع التلميح الذري
       if (saveState) {
-        saveState(updatedState).catch(err => console.error('Background save error:', err));
+        await saveState(updatedState, { entityType: 'request', entityId: requestId }).catch(err => console.error('Background save error:', err));
       }
       enqueueRequestDecision({
         requestId,

@@ -62,16 +62,30 @@ export function commitLocalSale(saleData) {
     syncStatus: 'pending' // 'pending' | 'synced' | 'failed'
   };
 
-  // 1. الحفظ في سجل الفواتير المحلي الدائم
+  // 1. الحفظ في سجل الفواتير المحلي الدائم مع حماية مساحة التخزين (LocalStorage Quota Guard)
   try {
     const currentSalesRaw = localStorage.getItem(STORAGE_KEYS.SALES);
     const currentSales = currentSalesRaw ? JSON.parse(currentSalesRaw) : [];
-    currentSales.unshift(finalizedSale);
-    // الاحتفاظ بآخر 1000 فاتورة محلياً للبحث السريع
-    if (currentSales.length > 1000) currentSales.length = 1000;
+    
+    // تجنب تخزين سلاسل base64 الضخمة للروشتات داخل السجل السطحي للذاكرة المحلية
+    const journalSale = { ...finalizedSale };
+    if (journalSale.rxImage && journalSale.rxImage.length > 5000) {
+      journalSale.hasRxImage = true;
+      journalSale.rxImage = undefined; // تفريغ الصورة لتفادي QuotaExceededError
+    }
+
+    currentSales.unshift(journalSale);
+    // الاحتفاظ بآخر 500 فاتورة محلياً للبحث السريع
+    if (currentSales.length > 500) currentSales.length = 500;
     localStorage.setItem(STORAGE_KEYS.SALES, JSON.stringify(currentSales));
   } catch (e) {
-    console.error('Error saving local sale:', e);
+    console.warn('Error saving local sale journal (attempting trimmed fallback):', e);
+    try {
+      // محاولة طوارئ بتخفيض السجل
+      const currentSalesRaw = localStorage.getItem(STORAGE_KEYS.SALES);
+      const currentSales = currentSalesRaw ? JSON.parse(currentSalesRaw) : [];
+      localStorage.setItem(STORAGE_KEYS.SALES, JSON.stringify(currentSales.slice(0, 50)));
+    } catch {}
   }
 
   // 2. إدراج حدث البيع في طابور المزامنة Outbox
@@ -158,13 +172,27 @@ export async function triggerBackgroundSync() {
 
     for (const evt of outbox) {
       try {
-        // محاكاة أو إرسال الطلب للسيرفر السحابي
-        const syncUrl = API_BASE_URL ? `${API_BASE_URL}/pos/sync-event` : '/api/pos/sync-event';
-        const res = await fetch(syncUrl, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(evt)
-        }).catch(() => null);
+        const token = localStorage.getItem('outstock_token') || localStorage.getItem('app_auth_token') || localStorage.getItem('app_token') || '';
+        const headers = { 'Content-Type': 'application/json' };
+        if (token) headers['Authorization'] = `Bearer ${token}`;
+
+        let res = null;
+        if (evt.endpoint) {
+          // حدث ذو نقطة نهاية مخصصة (مثل خصم المحفظة أو تسجيل عميل جديد)
+          res = await fetch(evt.endpoint, {
+            method: 'POST',
+            headers,
+            body: JSON.stringify(evt.payload || {})
+          }).catch(() => null);
+        } else {
+          // مبيعات نقاط البيع القياسية
+          const syncUrl = API_BASE_URL ? `${API_BASE_URL}/pos/sync-event` : '/api/pos/sync-event';
+          res = await fetch(syncUrl, {
+            method: 'POST',
+            headers,
+            body: JSON.stringify(evt)
+          }).catch(() => null);
+        }
 
         if (res && res.ok) {
           // تم التأكيد بنجاح من السيرفر

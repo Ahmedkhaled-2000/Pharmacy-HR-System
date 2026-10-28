@@ -31,7 +31,7 @@ export function hasEmployeeApprovedRoster(employeeId, dateStr, state) {
 
   // البحث عن جدول معتمد رسمي لهذا الموظف
   const roster = findEmployeeRoster(emp.id, dateStr, state);
-  return Boolean(roster && (roster.status === 'approved' || roster.adminApproved === true || roster.isApproved === true));
+  return Boolean(roster && (roster.status === 'approved' || roster.adminApproved === true || roster.isApproved === true || roster.branchApproved === true));
 }
 
 /**
@@ -363,8 +363,19 @@ export function calculateShiftMetrics(shift, state) {
   
   // فحص ما إذا كان للموظف جدول شهري معتمد رسمي لهذا اليوم
   const hasApprovedRoster = !isFlexibleSchedule && hasEmployeeApprovedRoster(shift.employeeId || emp?.id, shift.date, state);
-  const daySchedule = hasApprovedRoster ? getEmployeeDaySchedule(shift.employeeId || emp?.id, shift.date, state, shift.branchId) : null;
-  const isScheduledOffDay = Boolean(hasApprovedRoster && daySchedule && (daySchedule.type === 'off' || daySchedule.isOff === true));
+  let daySchedule = hasApprovedRoster ? getEmployeeDaySchedule(shift.employeeId || emp?.id, shift.date, state, shift.branchId) : null;
+
+  // 🛡️ صمام أمان حاسم للبصمات العابرة للفروع أو اختلاف فرع الماكينة عن فرع الروستر:
+  // إذا أرجعت الدالة isOtherBranchShift أو تم اعتبار اليوم راحة لمجرد اختلاف الفرع عن فرع البصمة،
+  // نسترجع جدول الموظف المعتمد العام بدون تقييد بفرع البصمة للتأكد مما إذا كان اليوم يوم عمل رسمي له
+  if (hasApprovedRoster && (!daySchedule || daySchedule.isOtherBranchShift || (daySchedule.isOff && daySchedule.type === 'off'))) {
+    const generalSchedule = getEmployeeDaySchedule(shift.employeeId || emp?.id, shift.date, state, null);
+    if (generalSchedule && !generalSchedule.isOff && generalSchedule.type !== 'off' && (generalSchedule.start || parseFloat(generalSchedule.hours) > 0)) {
+      daySchedule = generalSchedule;
+    }
+  }
+
+  const isScheduledOffDay = Boolean(hasApprovedRoster && daySchedule && (daySchedule.type === 'off' || daySchedule.isOff === true) && !daySchedule.isOtherBranchShift);
   const hasScheduledShiftWindow = Boolean(hasApprovedRoster && !isScheduledOffDay && daySchedule && daySchedule.start && daySchedule.end);
 
   // عندما يكون للموظف جدول شهري معتمد، تُستمد مواعيد الشفت الرسمية مباشرة من الجدول المعتمد لضمان التحديث التلقائي اللحظي
@@ -383,6 +394,8 @@ export function calculateShiftMetrics(shift, state) {
       if (eMins <= sMins) eMins += 24 * 60;
       scheduledHours = Math.round(((eMins - sMins) / 60) * 100) / 100;
     }
+  } else if (hasApprovedRoster && daySchedule && !isNaN(parseFloat(daySchedule.hours)) && parseFloat(daySchedule.hours) > 0) {
+    scheduledHours = parseFloat(daySchedule.hours);
   } else if (!isFlexibleSchedule && shift.scheduledHours !== undefined) {
     scheduledHours = parseFloat(shift.scheduledHours) || profileHours;
   }
@@ -405,16 +418,10 @@ export function calculateShiftMetrics(shift, state) {
       overtimeHours = actualWorkedHours;
     }
     // ب) إذا حضر في يوم عمل مجدول:
-    // يتم احتساب الساعات الأساسية لتغطية ساعات الوردية المقررة أولاً (مثل 8 ساعات)
+    // يتم احتساب الساعات الأساسية لتغطية ساعات الوردية المقررة أولاً (مثل 4 أو 8 ساعات)
     // وأي ساعات عمل فعلية إضافية تزيد عن ساعات الوردية المقررة تُحتسب كساعات إضافية
-    else if (hasApprovedRoster && hasScheduledShiftWindow && schedStartStr && schedEndStr && timeIn && hasRealTimeOut) {
-      const [sH, sM] = schedStartStr.split(':').map(Number);
-      let [eH, eM] = schedEndStr.split(':').map(Number);
-      let schedStartMins = sH * 60 + (sM || 0);
-      let schedEndMins = eH * 60 + (eM || 0);
-      if (schedEndMins <= schedStartMins) schedEndMins += 24 * 60;
-      const schedShiftHours = Math.round(((schedEndMins - schedStartMins) / 60) * 100) / 100;
-      const targetHours = schedShiftHours > 0 ? schedShiftHours : profileHours;
+    else if (hasApprovedRoster && !isScheduledOffDay && scheduledHours > 0) {
+      const targetHours = scheduledHours;
 
       if (actualWorkedHours > targetHours) {
         regularHours = targetHours;

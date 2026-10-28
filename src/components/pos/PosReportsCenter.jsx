@@ -1,4 +1,4 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { usePOS } from '../../context/POSContext';
 import { useAuth } from '../../context/AuthContext';
 import { useData } from '../../context/DataContext';
@@ -39,11 +39,11 @@ import {
 } from 'lucide-react';
 
 export default function PosReportsCenter({ isOpen, onClose }) {
-  const { currentShift, productsCatalog } = usePOS();
+  const { currentShift, productsCatalog, reportsActiveTab, setReportsActiveTab } = usePOS();
   const { currentBranch, currentEmpUser } = useAuth?.() || {};
   const { state } = useData?.() || {};
 
-  const [activeTab, setActiveTab] = useState('shifts'); // 'shifts' | 'sales' | 'items' | 'traffic' | 'security' | 'returns' | 'kpis'
+  const [activeTab, setActiveTab] = useState(reportsActiveTab || 'shifts');
   const [selectedBranch, setSelectedBranch] = useState(currentBranch?.id || 'all');
   const [selectedCashier, setSelectedCashier] = useState('all');
   const [selectedInvoiceType, setSelectedInvoiceType] = useState('all');
@@ -52,6 +52,27 @@ export default function PosReportsCenter({ isOpen, onClose }) {
   const [customTo, setCustomTo] = useState(() => new Date().toISOString().slice(0, 10));
   const [searchQuery, setSearchQuery] = useState('');
   const [isExporting, setIsExporting] = useState(false);
+
+  // مزامنة التبويب المحدد من القائمة السريعة
+  useEffect(() => {
+    if (reportsActiveTab) {
+      setActiveTab(reportsActiveTab);
+    }
+  }, [reportsActiveTab, isOpen]);
+
+  // إغلاق المودال بزر Escape
+  useEffect(() => {
+    if (!isOpen) return;
+    const handleKeyDown = (e) => {
+      if (e.key === 'Escape') {
+        e.preventDefault();
+        e.stopPropagation();
+        onClose?.();
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [isOpen, onClose]);
 
   // نافذة معاينة الطباعة الحرارية 80mm
   const [thermalPreviewText, setThermalPreviewText] = useState(null);

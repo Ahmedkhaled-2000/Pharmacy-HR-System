@@ -358,7 +358,8 @@ export default function OutstockSystemView({
     }
   }, [currentBranch]);
 
-  const effectiveBranchId = isProcurementManager ? 'all' : (activeBranch?.id || currentBranch?.id || currentUser?.branchId || currentUser?.branch_id || currentUser?.id || 'main');
+  const rawBranchId = isProcurementManager ? 'all' : (activeBranch?.id || currentBranch?.id || currentUser?.branchId || currentUser?.branch_id || currentUser?.id || 'main');
+  const effectiveBranchId = rawBranchId === 'all' ? 'all' : String(rawBranchId || '').replace(/^usr_branch_/, '');
 
   // التبويب النشط
   const [activeTab, setActiveTab] = useState(() => {
@@ -2016,6 +2017,7 @@ export default function OutstockSystemView({
             {activeTab === 'procurement_tracking' && (
               <PharmacyProcurementTrackingTab
                 branchId={effectiveBranchId}
+                initialFilter="available"
               />
             )}
 

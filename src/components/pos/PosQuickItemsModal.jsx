@@ -25,18 +25,19 @@ export default function PosQuickItemsModal({ isOpen, onClose, onSelectItem }) {
   const [lastAddedId, setLastAddedId] = useState(null);
   const searchInputRef = useRef(null);
 
-  // إغلاق المودال بزر Escape
+  // إغلاق المودال بزر Escape فورياً
   useEffect(() => {
     if (!isOpen) return;
     const handleKeyDown = (e) => {
       if (e.key === 'Escape') {
         e.preventDefault();
         e.stopPropagation();
+        if (e.stopImmediatePropagation) e.stopImmediatePropagation();
         onClose?.();
       }
     };
-    window.addEventListener('keydown', handleKeyDown);
-    return () => window.removeEventListener('keydown', handleKeyDown);
+    window.addEventListener('keydown', handleKeyDown, { capture: true });
+    return () => window.removeEventListener('keydown', handleKeyDown, { capture: true });
   }, [isOpen, onClose]);
 
   // التركيز في حقل البحث الداخلي فور الفتح
@@ -85,16 +86,17 @@ export default function PosQuickItemsModal({ isOpen, onClose, onSelectItem }) {
       style={{
         position: 'fixed',
         inset: 0,
-        backgroundColor: 'rgba(15, 23, 42, 0.28)',
-        backdropFilter: 'blur(5px)',
-        WebkitBackdropFilter: 'blur(5px)',
+        backgroundColor: 'rgba(15, 23, 42, 0.35)',
+        backdropFilter: 'blur(6px)',
+        WebkitBackdropFilter: 'blur(6px)',
         zIndex: 99995,
         display: 'flex',
         alignItems: 'center',
         justifyContent: 'center',
-        padding: '16px',
+        padding: '24px 16px',
         direction: 'rtl',
-        animation: 'posFadeIn 0.15s ease-out'
+        animation: 'posFadeIn 0.15s ease-out',
+        overflowY: 'auto'
       }}
       onClick={(e) => {
         if (e.target === e.currentTarget) onClose?.();
@@ -104,16 +106,17 @@ export default function PosQuickItemsModal({ isOpen, onClose, onSelectItem }) {
         style={{
           background: '#ffffff',
           color: '#0f172a',
-          border: '1px solid #cbd5e1',
+          border: '1.5px solid #0d9488',
           borderRadius: '20px',
           width: '95%',
           maxWidth: '880px',
-          maxHeight: '86vh',
+          maxHeight: '82vh',
           display: 'flex',
           flexDirection: 'column',
-          boxShadow: '0 25px 60px -15px rgba(15, 23, 42, 0.25), 0 0 0 1px rgba(15, 23, 42, 0.05)',
+          boxShadow: '0 25px 60px -15px rgba(15, 23, 42, 0.3), 0 0 0 1px rgba(15, 23, 42, 0.05)',
           overflow: 'hidden',
-          animation: 'posPopScale 0.2s cubic-bezier(0.16, 1, 0.3, 1)'
+          animation: 'posPopScale 0.2s cubic-bezier(0.16, 1, 0.3, 1)',
+          margin: 'auto'
         }}
         onClick={(e) => e.stopPropagation()}
       >

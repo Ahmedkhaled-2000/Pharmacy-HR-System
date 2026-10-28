@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import { usePOS } from '../../context/POSContext';
+import { useUI } from '../../context/UIContext';
 import { Clock, DollarSign, X, CheckCircle2, AlertTriangle, Printer } from 'lucide-react';
 
 export default function PosShiftModal() {
@@ -9,6 +10,7 @@ export default function PosShiftModal() {
     currentShift,
     setCurrentShift
   } = usePOS();
+  const { showToast } = useUI?.() || {};
 
   const [physicalCash, setPhysicalCash] = useState('');
   const [closingNotes, setClosingNotes] = useState('');
@@ -16,20 +18,34 @@ export default function PosShiftModal() {
   if (!isShiftModalOpen) return null;
 
   const openingCash = parseFloat(currentShift?.openingCash || 0);
-  const salesCash = parseFloat(currentShift?.totalSalesAmount || 0);
-  const expectedCashInDrawer = openingCash + salesCash;
+  const totalSales = parseFloat(currentShift?.totalSalesAmount || 0);
+  const cashSales = parseFloat(currentShift?.cashSalesAmount ?? currentShift?.totalSalesAmount ?? 0);
+  const visaSales = parseFloat(currentShift?.visaSalesAmount || 0);
+  const walletSales = parseFloat(currentShift?.walletSalesAmount || 0);
+  const otherSales = parseFloat(currentShift?.otherSalesAmount || 0);
+  const cashRefunds = parseFloat(currentShift?.cashRefunds || 0);
+
+  // النقدية الفعلية المتوقعة بالدرج تحسب حصراً من العمليات النقدية والعهدة مع خصم المرتجعات
+  const expectedCashInDrawer = Math.max(0, parseFloat((openingCash + cashSales - cashRefunds).toFixed(2)));
   const countedCash = parseFloat(physicalCash || 0);
   const variance = physicalCash !== '' ? (countedCash - expectedCashInDrawer) : 0;
 
   const handleCloseShift = () => {
     if (physicalCash === '') {
-      alert('يرجى إدخال النقدية الفعلية الموجودة بالدرج لتسوية الوردية.');
+      showToast?.('⚠️ يرجى إدخال النقدية الفعلية الموجودة بالدرج لتسوية الوردية.');
       return;
     }
 
     const closedShift = {
       ...currentShift,
       endTime: new Date().toISOString(),
+      openingCash,
+      totalSales,
+      cashSales,
+      visaSales,
+      walletSales,
+      otherSales,
+      cashRefunds,
       expectedCash: expectedCashInDrawer,
       physicalCash: countedCash,
       variance,
@@ -44,7 +60,7 @@ export default function PosShiftModal() {
       localStorage.setItem('pharma_pos_closed_shifts', JSON.stringify(pastShifts));
     } catch {}
 
-    // فتح وردية جديدة تلقائياً
+    // فتح وردية جديدة تلقائياً مع نقل العهدة الفعلية
     const newShift = {
       id: `shift_${Date.now()}`,
       branchId: currentShift.branchId,
@@ -52,14 +68,19 @@ export default function PosShiftModal() {
       cashierName: currentShift.cashierName,
       cashierId: currentShift.cashierId,
       startTime: new Date().toISOString(),
-      openingCash: countedCash, // نقل العهدة الفعلية للوردية التالية
+      openingCash: countedCash,
       totalSalesAmount: 0,
+      cashSalesAmount: 0,
+      visaSalesAmount: 0,
+      walletSalesAmount: 0,
+      otherSalesAmount: 0,
+      cashRefunds: 0,
       salesCount: 0,
       status: 'open'
     };
 
     setCurrentShift(newShift);
-    alert(`✅ تم إغلاق الوردية وطباعة تقرير Z-Report بنجاح! الفارق في العهدة: ${variance >= 0 ? '+' : ''}${variance.toFixed(2)} ج.`);
+    showToast?.(`✅ تم إغلاق الوردية بنجاح! الفارق في الدرج: ${variance >= 0 ? '+' : ''}${variance.toFixed(2)} ج.`);
     setIsShiftModalOpen(false);
   };
 
@@ -131,9 +152,15 @@ export default function PosShiftModal() {
               <strong>{openingCash.toFixed(2)} ج</strong>
             </div>
             <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '6px', fontSize: '12.5px' }}>
-              <span>إجمالي مبيعات الوردية (النقدي):</span>
-              <strong style={{ color: 'var(--primary, #0d9488)' }}>+{salesCash.toFixed(2)} ج</strong>
+              <span>مبيعات نقدية دخلت الدرج (Cash):</span>
+              <strong style={{ color: 'var(--primary, #0d9488)' }}>+{cashSales.toFixed(2)} ج</strong>
             </div>
+            {cashRefunds > 0 && (
+              <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '6px', fontSize: '12.5px', color: '#b91c1c' }}>
+                <span>مرتجعات نقدية خُصمت من الدرج:</span>
+                <strong>-{cashRefunds.toFixed(2)} ج</strong>
+              </div>
+            )}
             <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '6px', fontSize: '12.5px' }}>
               <span>عدد فواتير الوردية:</span>
               <strong>{currentShift.salesCount || 0} فاتورة</strong>
@@ -148,10 +175,24 @@ export default function PosShiftModal() {
                 fontWeight: 900
               }}
             >
-              <span>النقدية المتوقعة بالدرج:</span>
-              <span>{expectedCashInDrawer.toFixed(2)} جنيه</span>
+              <span>💵 النقدية المتوقعة بالدرج (الصافي):</span>
+              <span style={{ color: '#0f766e' }}>{expectedCashInDrawer.toFixed(2)} جنيه</span>
             </div>
           </div>
+
+          {/* تسويات الدفع الإلكتروني (تسوية بنكية لا تدخل الدرج) */}
+          {(visaSales > 0 || walletSales > 0 || otherSales > 0) && (
+            <div style={{ background: '#f0fdf4', padding: '10px 14px', borderRadius: '10px', border: '1px solid #bbf7d0', fontSize: '11.5px' }}>
+              <div style={{ fontWeight: 800, color: '#166534', marginBottom: '4px' }}>
+                💳 مدفوعات إلكترونية غير نقدية (تسويات بنكية منفصلة عن الدرج):
+              </div>
+              <div style={{ display: 'flex', justifyContent: 'space-between', color: '#15803d' }}>
+                <span>بطاقات بنكية / فيزا: <strong>{visaSales.toFixed(2)} ج</strong></span>
+                <span>محافظ إلكترونية: <strong>{walletSales.toFixed(2)} ج</strong></span>
+                <span>إجمالي مبيعات الوردية الكلي: <strong>{totalSales.toFixed(2)} ج</strong></span>
+              </div>
+            </div>
+          )}
 
           {/* إدخال الجرد الفعلي للنقدية */}
           <div>

@@ -1,9 +1,11 @@
 import React, { useState } from 'react';
 import { usePOS } from '../../context/POSContext';
+import { useUI } from '../../context/UIContext';
 import { Package, X, ArrowLeftRight, Building2, CheckCircle2, TrendingUp, AlertTriangle } from 'lucide-react';
 
 export default function PosDeadStockExchangeModal() {
   const { isDeadStockModalOpen, setIsDeadStockModalOpen } = usePOS();
+  const { showToast } = useUI?.() || {};
 
   // بيانات افتراضية لأدوية راكدة في هذا الفرع وتطلب بكثرة في فروع أخرى
   const [deadStockItems, setDeadStockItems] = useState([
@@ -51,7 +53,7 @@ export default function PosDeadStockExchangeModal() {
     setDeadStockItems((prev) =>
       prev.map((i) => (i.id === item.id ? { ...i, status: 'transferred' } : i))
     );
-    alert(`✅ تم إرسال إذن تحويل مخزني فوري لصنف [${item.tradeNameAr}] بعدد ${item.stockHere} علبة إلى ${item.targetBranch} لتصفير الراكد ومنع الخسارة.`);
+    showToast?.(`✅ تم إرسال إذن تحويل مخزني فوري لصنف [${item.tradeNameAr}] بعدد ${item.stockHere} علبة إلى ${item.targetBranch}`);
   };
 
   return (

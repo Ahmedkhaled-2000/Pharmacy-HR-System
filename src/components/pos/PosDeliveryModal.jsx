@@ -1,6 +1,7 @@
 import React, { useState, useMemo, useEffect } from 'react';
 import { usePOS } from '../../context/POSContext';
 import { useAuth } from '../../context/AuthContext';
+import { useUI } from '../../context/UIContext';
 import {
   getDeliveryPilots,
   saveDeliveryPilots,
@@ -42,6 +43,7 @@ import {
 export default function PosDeliveryModal() {
   const { isDeliveryModalOpen, setIsDeliveryModalOpen, currentShift } = usePOS();
   const { currentBranch, currentEmpUser } = useAuth?.() || {};
+  const { showToast, showConfirm } = useUI?.() || {};
 
   const [activeTab, setActiveTab] = useState('orders'); // 'orders' | 'settlement' | 'pilots'
   const [activeStatusFilter, setActiveStatusFilter] = useState('all'); // 'all' | 'pending' | 'on_way' | 'delivered' | 'returned'
@@ -161,18 +163,19 @@ export default function PosDeliveryModal() {
   };
 
   // تسوية نقدية الطيار وتوريدها للدرج
-  const handleSettlePilot = (summary) => {
+  const handleSettlePilot = async (summary) => {
     if (summary.totalCashCollected <= 0) {
-      alert(`لا توجد نقدية محصلة مستحقة التوريد للطيار ${summary.pilot.name}`);
+      showToast?.(`لا توجد نقدية محصلة مستحقة التوريد للطيار ${summary.pilot.name}`);
       return;
     }
-    const confirmSettle = window.confirm(
-      `تأكيد تسوية عهدة [${summary.pilot.name}]؟\n` +
-      `إجمالي المحصل: ${summary.totalCashCollected.toFixed(2)} ج.م\n` +
-      `عمولة الطيار: ${summary.totalCommissionEarned.toFixed(2)} ج.م\n` +
-      `الصافي المورد لدرج الكاشير: ${(summary.totalCashCollected - summary.totalCommissionEarned).toFixed(2)} ج.م`
-    );
-    if (!confirmSettle) return;
+    const confirmed = showConfirm ? await showConfirm({
+      title: 'تسوية وتوريد عهدة الطيار',
+      message: `تأكيد تسوية عهدة [${summary.pilot.name}]؟\nإجمالي المحصل: ${summary.totalCashCollected.toFixed(2)} ج.م\nعمولة الطيار: ${summary.totalCommissionEarned.toFixed(2)} ج.م\nالصافي المورد لدرج الكاشير: ${(summary.totalCashCollected - summary.totalCommissionEarned).toFixed(2)} ج.م`,
+      confirmText: 'تأكيد التسوية والتوريد',
+      type: 'warning'
+    }) : window.confirm(`تأكيد تسوية عهدة [${summary.pilot.name}]؟`);
+
+    if (!confirmed) return;
 
     settlePilotCash(
       summary.pilot.id,
@@ -182,7 +185,7 @@ export default function PosDeliveryModal() {
       currentShift?.id
     );
     setRefreshTrigger((prev) => prev + 1);
-    alert(`تمت تسوية وتوريد عهدة ${summary.pilot.name} بنجاح إلى درج الكاشير! ✅`);
+    showToast?.(`تمت تسوية وتوريد عهدة ${summary.pilot.name} بنجاح إلى درج الكاشير! ✅`);
   };
 
   return (

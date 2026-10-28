@@ -290,6 +290,190 @@ try {
         ");
     } catch (Throwable) {}
 
+    // 12. جداول منظومة إدارة المخازن المركزية والفروع (PharmaOS Stock)
+    try {
+        $db->exec("
+            CREATE TABLE IF NOT EXISTS public.inventory_locations (
+                id VARCHAR(50) PRIMARY KEY,
+                code VARCHAR(50) NOT NULL UNIQUE,
+                name_ar VARCHAR(255) NOT NULL,
+                location_type VARCHAR(50) NOT NULL,
+                branch_id VARCHAR(50) NULL,
+                is_central BOOLEAN NOT NULL DEFAULT false,
+                manager_employee_id VARCHAR(100) NULL,
+                manager_name VARCHAR(150) NULL,
+                allow_negative_stock BOOLEAN NOT NULL DEFAULT false,
+                is_active BOOLEAN NOT NULL DEFAULT true,
+                created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
+            );
+            CREATE INDEX IF NOT EXISTS idx_inv_loc_type ON public.inventory_locations (location_type);
+            CREATE INDEX IF NOT EXISTS idx_inv_loc_branch ON public.inventory_locations (branch_id);
+
+            CREATE TABLE IF NOT EXISTS public.inventory_batches (
+                id VARCHAR(64) PRIMARY KEY,
+                medication_id VARCHAR(36) NOT NULL,
+                batch_number VARCHAR(100) NOT NULL,
+                expiry_date DATE NOT NULL,
+                production_date DATE NULL,
+                cost_price NUMERIC(12, 4) NOT NULL DEFAULT 0.0000,
+                public_price NUMERIC(12, 2) NOT NULL DEFAULT 0.00,
+                supplier_id VARCHAR(36) NULL,
+                receipt_reference_id VARCHAR(64) NULL,
+                is_quarantined BOOLEAN NOT NULL DEFAULT false,
+                created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                CONSTRAINT uq_med_batch_cost UNIQUE (medication_id, batch_number, expiry_date, cost_price)
+            );
+            CREATE INDEX IF NOT EXISTS idx_batches_med_exp ON public.inventory_batches (medication_id, expiry_date ASC);
+            CREATE INDEX IF NOT EXISTS idx_batches_num ON public.inventory_batches (batch_number);
+
+            CREATE TABLE IF NOT EXISTS public.inventory_ledger (
+                id BIGSERIAL PRIMARY KEY,
+                transaction_id VARCHAR(64) NOT NULL,
+                idempotency_key VARCHAR(191) NOT NULL UNIQUE,
+                movement_type VARCHAR(50) NOT NULL,
+                location_id VARCHAR(50) NOT NULL REFERENCES public.inventory_locations(id) ON DELETE RESTRICT,
+                medication_id VARCHAR(36) NOT NULL,
+                batch_id VARCHAR(64) NULL REFERENCES public.inventory_batches(id) ON DELETE RESTRICT,
+                quantity_base NUMERIC(14, 4) NOT NULL,
+                unit_cost NUMERIC(12, 4) NOT NULL DEFAULT 0.0000,
+                total_cost NUMERIC(14, 4) NOT NULL DEFAULT 0.0000,
+                document_type VARCHAR(50) NOT NULL,
+                document_number VARCHAR(100) NOT NULL,
+                document_id VARCHAR(100) NULL,
+                source_branch_id VARCHAR(50) NULL,
+                target_branch_id VARCHAR(50) NULL,
+                performed_by_id VARCHAR(100) NOT NULL,
+                performed_by_name VARCHAR(150) NOT NULL,
+                performed_by_role VARCHAR(50) NOT NULL,
+                notes TEXT NULL,
+                created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
+            );
+            CREATE INDEX IF NOT EXISTS idx_ledger_loc_med ON public.inventory_ledger (location_id, medication_id);
+            CREATE INDEX IF NOT EXISTS idx_ledger_batch ON public.inventory_ledger (batch_id);
+            CREATE INDEX IF NOT EXISTS idx_ledger_doc ON public.inventory_ledger (document_type, document_number);
+            CREATE INDEX IF NOT EXISTS idx_ledger_created ON public.inventory_ledger (created_at DESC);
+            CREATE INDEX IF NOT EXISTS idx_ledger_movement ON public.inventory_ledger (movement_type);
+
+            CREATE TABLE IF NOT EXISTS public.inventory_balances (
+                id VARCHAR(120) PRIMARY KEY,
+                location_id VARCHAR(50) NOT NULL REFERENCES public.inventory_locations(id) ON DELETE RESTRICT,
+                medication_id VARCHAR(36) NOT NULL,
+                batch_id VARCHAR(64) NULL REFERENCES public.inventory_batches(id) ON DELETE RESTRICT,
+                quantity_on_hand NUMERIC(14, 4) NOT NULL DEFAULT 0.0000,
+                quantity_reserved NUMERIC(14, 4) NOT NULL DEFAULT 0.0000,
+                avg_unit_cost NUMERIC(12, 4) NOT NULL DEFAULT 0.0000,
+                last_movement_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                CONSTRAINT uq_inv_balance_target UNIQUE (location_id, medication_id, batch_id)
+            );
+            CREATE INDEX IF NOT EXISTS idx_balances_loc_qty ON public.inventory_balances (location_id, quantity_on_hand);
+            CREATE INDEX IF NOT EXISTS idx_balances_med ON public.inventory_balances (medication_id);
+
+            CREATE TABLE IF NOT EXISTS public.inventory_transfers (
+                id VARCHAR(64) PRIMARY KEY,
+                transfer_number VARCHAR(50) NOT NULL UNIQUE,
+                transfer_type VARCHAR(30) NOT NULL DEFAULT 'main_to_branch',
+                source_location_id VARCHAR(50) NOT NULL REFERENCES public.inventory_locations(id) ON DELETE RESTRICT,
+                destination_location_id VARCHAR(50) NOT NULL REFERENCES public.inventory_locations(id) ON DELETE RESTRICT,
+                in_transit_location_id VARCHAR(50) NOT NULL REFERENCES public.inventory_locations(id) ON DELETE RESTRICT,
+                status VARCHAR(30) NOT NULL DEFAULT 'draft',
+                requested_by_id VARCHAR(100) NOT NULL,
+                requested_by_name VARCHAR(150) NOT NULL,
+                approved_by_id VARCHAR(100) NULL,
+                approved_by_name VARCHAR(150) NULL,
+                dispatched_by_id VARCHAR(100) NULL,
+                dispatched_by_name VARCHAR(150) NULL,
+                received_by_id VARCHAR(100) NULL,
+                received_by_name VARCHAR(150) NULL,
+                total_requested_items INTEGER NOT NULL DEFAULT 0,
+                total_received_items INTEGER NOT NULL DEFAULT 0,
+                total_cost_amount NUMERIC(14, 2) NOT NULL DEFAULT 0.00,
+                driver_name VARCHAR(100) NULL,
+                driver_phone VARCHAR(50) NULL,
+                notes TEXT NULL,
+                dispatched_at TIMESTAMPTZ NULL,
+                received_at TIMESTAMPTZ NULL,
+                created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
+            );
+
+            CREATE TABLE IF NOT EXISTS public.inventory_transfer_items (
+                id VARCHAR(64) PRIMARY KEY,
+                transfer_id VARCHAR(64) NOT NULL REFERENCES public.inventory_transfers(id) ON DELETE CASCADE,
+                medication_id VARCHAR(36) NOT NULL,
+                batch_id VARCHAR(64) NULL REFERENCES public.inventory_batches(id) ON DELETE RESTRICT,
+                unit_type VARCHAR(20) NOT NULL DEFAULT 'pack',
+                quantity_requested NUMERIC(10, 2) NOT NULL,
+                quantity_approved NUMERIC(10, 2) NOT NULL DEFAULT 0,
+                quantity_dispatched NUMERIC(10, 2) NOT NULL DEFAULT 0,
+                quantity_received NUMERIC(10, 2) NOT NULL DEFAULT 0,
+                quantity_damaged NUMERIC(10, 2) NOT NULL DEFAULT 0,
+                quantity_shortage NUMERIC(10, 2) NOT NULL DEFAULT 0,
+                unit_cost NUMERIC(12, 4) NOT NULL DEFAULT 0.0000,
+                item_status VARCHAR(30) NOT NULL DEFAULT 'pending',
+                notes TEXT NULL,
+                created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
+            );
+
+            CREATE TABLE IF NOT EXISTS public.inventory_counts (
+                id VARCHAR(64) PRIMARY KEY,
+                count_number VARCHAR(50) NOT NULL UNIQUE,
+                location_id VARCHAR(50) NOT NULL REFERENCES public.inventory_locations(id) ON DELETE RESTRICT,
+                count_type VARCHAR(30) NOT NULL DEFAULT 'full',
+                status VARCHAR(30) NOT NULL DEFAULT 'in_progress',
+                counted_by_id VARCHAR(100) NOT NULL,
+                counted_by_name VARCHAR(150) NOT NULL,
+                reviewed_by_id VARCHAR(100) NULL,
+                reviewed_by_name VARCHAR(150) NULL,
+                snapshot_timestamp TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                total_variance_cost NUMERIC(14, 2) NOT NULL DEFAULT 0.00,
+                notes TEXT NULL,
+                posted_at TIMESTAMPTZ NULL,
+                created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
+            );
+
+            CREATE TABLE IF NOT EXISTS public.inventory_count_items (
+                id VARCHAR(64) PRIMARY KEY,
+                count_id VARCHAR(64) NOT NULL REFERENCES public.inventory_counts(id) ON DELETE CASCADE,
+                medication_id VARCHAR(36) NOT NULL,
+                batch_id VARCHAR(64) NULL REFERENCES public.inventory_batches(id) ON DELETE RESTRICT,
+                book_quantity NUMERIC(14, 4) NOT NULL,
+                actual_quantity NUMERIC(14, 4) NOT NULL DEFAULT 0.0000,
+                variance_quantity NUMERIC(14, 4) NOT NULL DEFAULT 0.0000,
+                unit_cost NUMERIC(12, 4) NOT NULL DEFAULT 0.0000,
+                variance_total_cost NUMERIC(14, 4) NOT NULL DEFAULT 0.0000,
+                barcode_scanned VARCHAR(100) NULL,
+                notes TEXT NULL,
+                created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
+            );
+
+            CREATE TABLE IF NOT EXISTS public.inventory_audit_logs (
+                id BIGSERIAL PRIMARY KEY,
+                action_type VARCHAR(100) NOT NULL,
+                target_entity VARCHAR(50) NOT NULL,
+                target_id VARCHAR(100) NOT NULL,
+                location_id VARCHAR(50) NULL,
+                performed_by_id VARCHAR(100) NULL,
+                performed_by_name VARCHAR(150) NULL,
+                details JSONB NULL,
+                client_ip VARCHAR(45) NULL,
+                created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
+            );
+
+            INSERT INTO public.inventory_locations (id, code, name_ar, location_type, is_central, allow_negative_stock)
+            VALUES 
+              ('loc_central_main', 'WH-MAIN', 'المخزن الرئيسي المركزي', 'central_warehouse', true, false),
+              ('loc_in_transit', 'WH-TRANSIT', 'بضاعة في الطريق (In-Transit)', 'in_transit', false, false),
+              ('loc_damaged', 'WH-DAMAGED', 'مستودع التوالف والهوالك', 'scrap', false, false)
+            ON CONFLICT (id) DO NOTHING;
+        ");
+    } catch (Throwable $stockEx) {
+        error_log('[PharmaOS Stock Migration Warning] ' . $stockEx->getMessage());
+    }
+
     // تفريغ الكاش بعد الـ Migration
     MicroCache::invalidate();
 

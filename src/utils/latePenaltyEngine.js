@@ -304,12 +304,44 @@ export function getScheduledShiftForDate(employeeId, dateStr, state, targetBranc
   }
 
   // 1. فحص طلبات تعديل الشيفت المعتمدة أولاً (Shift Adjustment Requests)
-  const approvedShiftAdj = (state.requests || []).find(
-    (r) => (String(r.employeeId) === empIdStr || (empCodeStr && String(r.employeeId) === empCodeStr)) &&
-      (r.type === 'shift_adjustment' || r.type === 'roster_edit' || r.type === 'roster_update' || r.type === 'roster_edit_request' || r.type === 'schedule_edit') &&
-      (r.status === 'approved' || r.adminApproved || (r.branchApproved && r.isDirectToAdmin)) &&
-      (r.date === dateStr || (Array.isArray(r.dates) && r.dates.includes(dateStr)) || (r.schedule && r.schedule[dateStr]) || (r.newSchedule && r.newSchedule[dateStr]) || r.replacementRestDate === dateStr)
-  );
+  const approvedShiftAdj = (state.requests || []).find((r) => {
+    if (!r) return false;
+    // 🛡️ استبعاد أي طلب تم إلغاؤه أو تجاوزه إدارياً (Superseded) أو رفضه
+    if (r.supersededByAdmin || r.status === 'superseded' || r.status === 'cancelled' || r.isCancelled || r.status === 'rejected' || r.rejected) return false;
+
+    const isEmpMatch = String(r.employeeId) === empIdStr || (empCodeStr && (String(r.employeeCode) === empCodeStr || String(r.employeeId) === empCodeStr));
+    if (!isEmpMatch) return false;
+
+    const isAdjType = r.type === 'shift_adjustment' || r.type === 'roster_edit' || r.type === 'roster_update' || r.type === 'roster_edit_request' || r.type === 'schedule_edit';
+    if (!isAdjType) return false;
+
+    const isApproved = r.status === 'approved' || r.adminApproved === true || (r.branchApproved && r.isDirectToAdmin);
+    if (!isApproved) return false;
+
+    // 🛡️ فحص مطابقة الفرع إذا كان محدداً
+    const effectiveBId = targetBranchId || emp?.branchId;
+    if (r.branchId && effectiveBId && String(r.branchId).trim() !== String(effectiveBId).trim()) return false;
+
+    // 🛡️ مقترحات الجداول الشهرية الشاملة القديمة لا تلغي الجداول المعتمدة الرسمية المحفوظة في rosters
+    const isWholeRosterProposal = r.type === 'roster_update' || r.type === 'roster_edit' || r.type === 'roster_edit_request';
+    if (isWholeRosterProposal) {
+      const hasActiveApprovedRoster = (state.rosters || []).some(ros =>
+        (ros.status === 'approved' || ros.adminApproved || !ros.status) &&
+        (String(ros.employeeId) === empIdStr || (empCodeStr && String(ros.employeeCode) === empCodeStr)) &&
+        (!effectiveBId || !ros.branchId || String(ros.branchId).trim() === String(effectiveBId).trim()) &&
+        ros.schedule && ros.schedule[dateStr]
+      );
+      if (hasActiveApprovedRoster) return false;
+    }
+
+    return (
+      r.date === dateStr ||
+      (Array.isArray(r.dates) && r.dates.includes(dateStr)) ||
+      (r.schedule && r.schedule[dateStr]) ||
+      (r.newSchedule && r.newSchedule[dateStr]) ||
+      r.replacementRestDate === dateStr
+    );
+  });
 
   if (approvedShiftAdj) {
     const schedItem = (approvedShiftAdj.schedule && approvedShiftAdj.schedule[dateStr]) ||
@@ -742,23 +774,35 @@ export function recalculateEmployeeCycleLateness({
     }
 
     // استخراج بداية الشيفت المجدول مع مطابقة فرع الوردية الفعلي
-    const sched = getScheduledShiftForDate(emp.id, shift.date, state, shift.branchId);
+    let sched = getScheduledShiftForDate(emp.id, shift.date, state, shift.branchId);
     if (!sched || sched.isOff || sched.type === 'off' || !sched.start) {
-      // إذا تحول اليوم إلى راحة أسبوعية أو لا يوجد شيفت مجدول، يتم تصفير أي واقعة تأخير سابقة
-      const oldInc = existingIncidentsByShift.get(`${emp.id}_${shift.id}`) || existingIncidentsByDate.get(`${emp.id}_${shift.date}`);
-      if (oldInc && oldInc.id) {
-        supersededIncidentIds.push(String(oldInc.id));
+      const fallbackSched = getScheduledShiftForDate(emp.id, shift.date, state, null);
+      if (fallbackSched && !fallbackSched.isOff && fallbackSched.type !== 'off' && fallbackSched.start) {
+        sched = fallbackSched;
       }
+    }
+    if (!sched || sched.isOff || sched.type === 'off' || !sched.start) {
+      // إذا تحول اليوم إلى راحة أسبوعية أو لا يوجد شيفت مجدول، يتم تصفير أي واقعة تأخير سابقة لهذا اليوم
+      (state.lateIncidents || []).forEach((inc) => {
+        if (!inc) return;
+        const isEmp = String(inc.employeeId) === empIdStr || (empCodeStr && (String(inc.employeeCode) === empCodeStr || String(inc.employeeId) === empCodeStr));
+        if (isEmp && inc.date === shift.date && inc.id) {
+          supersededIncidentIds.push(String(inc.id));
+        }
+      });
       continue;
     }
 
     const diffMinutes = calculateLatenessMinutes(sched.start, shift.timeIn);
     if (diffMinutes <= 0) {
       // حضور في الموعد أو مبكر: إلغاء/حذف أي واقعة تأخير سابقة لهذا اليوم
-      const oldInc = existingIncidentsByShift.get(`${emp.id}_${shift.id}`) || existingIncidentsByDate.get(`${emp.id}_${shift.date}`);
-      if (oldInc && oldInc.id) {
-        supersededIncidentIds.push(String(oldInc.id));
-      }
+      (state.lateIncidents || []).forEach((inc) => {
+        if (!inc) return;
+        const isEmp = String(inc.employeeId) === empIdStr || (empCodeStr && (String(inc.employeeCode) === empCodeStr || String(inc.employeeId) === empCodeStr));
+        if (isEmp && inc.date === shift.date && inc.id) {
+          supersededIncidentIds.push(String(inc.id));
+        }
+      });
       continue;
     }
 
@@ -859,12 +903,18 @@ export function recalculateEmployeeCycleLateness({
 
     // 🛡️ فحص: هل تم تعديل الوردية أو الجدول الشهري لهذا اليوم صراحة من الإدارة؟
     const isDateExplicitlyChanged = changedDatesSet.has(shift.date);
+    const isScheduleTimeChanged = Boolean(
+      prevInc && prevInc.scheduledStartTime && sched.start && prevInc.scheduledStartTime !== sched.start
+    );
 
-    // 🛡️ فحص حاسم: هل الواقعة الحالية معتمدة ومؤكدة رسمياً من الإدارة وبها خصم مالي ساري؟
-    // الجزاءات الإدارية المعتمدة لها حصانة قطعية ولا يجوز إسقاطها آلياً بسبب إذن أو تعديل بصمة في الخلفية
+    // 🛡️ فحص حاسم: هل الواقعة الحالية معتمدة ومؤكدة رسمياً من الإدارة وتعديلاً يدوياً مقصوداً؟
+    // الجزاءات اليدوية المعدلة صراحة من الإدارة فقط تحتفظ بحصانتها (ما لم يتم تغيير موعد الشيفت أو تعديل اليوم)
     const hasAdminConfirmedPenalty = Boolean(
       prevInc &&
-      (prevInc.status === 'approved' || prevInc.status === 'overridden' || prevInc.isConfirmedByAdmin || prevInc.adminApproved) &&
+      (prevInc.status === 'overridden' || prevInc.isManualOverride || prevInc.isConfirmedByAdmin) &&
+      !isDateExplicitlyChanged &&
+      !isScheduleTimeChanged &&
+      !clearPenaltiesOnChangedDates &&
       (parseFloat(prevInc.deductionMinutes) > 0 || parseFloat(prevInc.penaltyAmount) > 0) &&
       !prevInc.isCancelled &&
       prevInc.status !== 'cancelled' &&
@@ -899,17 +949,6 @@ export function recalculateEmployeeCycleLateness({
       isCancelled = true;
       cancellationReason = `تم إلغاء الجزاء لتقديم طلب تعديل بصمة رسمي (${activePunchEditReq.id || ''})`;
       overrideReason = 'تم إلغاء جزاء التأخير لتقديم طلب تعديل بصمة جاري أو معتمد';
-      occurrenceNumber = 0;
-    } else if (isDateExplicitlyChanged && clearPenaltiesOnChangedDates) {
-      // 🌟 تم إسقاط الجزاء تلقائياً لتعديل الشفت/الجدول من قبل الإدارة
-      actionType = 'grace';
-      actionLabel = 'سماح (تعديل شفت/جدول بالإدارة)';
-      deductionMins = 0;
-      penaltyAmount = 0;
-      status = 'cancelled';
-      isCancelled = true;
-      cancellationReason = 'تم إلغاء الجزاء تلقائياً لتعديل الشفت أو الجدول من قبل الإدارة';
-      overrideReason = 'تم إلغاء الجزاء لتعديل الشفت/الجدول';
       occurrenceNumber = 0;
     } else if (approvedShiftAdj) {
       // ✅ تم إلغاء الجزاء والخصم رسمياً لاعتماد طلب تعديل الشيفت
@@ -1310,13 +1349,34 @@ export function reconcileEmployeeScheduleOrPunchChange({
     };
   }
 
-  // 1. حساب دقائق الخصم والمبالغ السابقة لهذا الموظف قبل التسوية
+  const changedDatesList = Array.isArray(changedDates) ? changedDates : (changedDates ? [changedDates] : []);
+  const changedDatesSet = new Set(changedDatesList);
+
+  const getCycleForDate = (dateStr) => {
+    if (!dateStr || dateStr.length < 10) return null;
+    const [y, m, d] = dateStr.slice(0, 10).split('-').map(Number);
+    if (d >= 21) {
+      return m === 12 ? `${y + 1}-01` : `${y}-${String(m + 1).padStart(2, '0')}`;
+    }
+    return `${y}-${String(m).padStart(2, '0')}`;
+  };
+
+  const targetCycles = new Set(changedDatesList.map(getCycleForDate).filter(Boolean));
+  const cycleFilterFn = targetCycles.size > 0
+    ? (d) => targetCycles.has(getCycleForDate(d))
+    : null;
+
+  // 1. حساب دقائق الخصم والمبالغ السابقة لهذا الموظف قبل التسوية في الدورة المستهدفة
   const isFlex = isVariableScheduleEmployee(emp);
   let prevDedMins = 0;
   let prevMoney = 0;
-  const prevEmpIncidents = (state.lateIncidents || []).filter(
-    (inc) => inc && (String(inc.employeeId) === empIdStr || (emp.code && String(inc.employeeCode) === String(emp.code)))
-  );
+  const prevEmpIncidents = (state.lateIncidents || []).filter((inc) => {
+    if (!inc) return false;
+    const isEmp = String(inc.employeeId) === empIdStr || (emp.code && String(inc.employeeCode) === String(emp.code));
+    if (!isEmp) return false;
+    if (cycleFilterFn && !cycleFilterFn(inc.date)) return false;
+    return true;
+  });
   prevEmpIncidents.forEach((inc) => {
     if (inc.status !== 'cancelled' && (parseFloat(inc.deductionMinutes) || 0) > 0) {
       prevDedMins += parseFloat(inc.deductionMinutes);
@@ -1330,17 +1390,15 @@ export function reconcileEmployeeScheduleOrPunchChange({
     ? { incidents: [], updatedRequests: state.requests || [], supersededIncidentIds: [] }
     : recalculateEmployeeCycleLateness({
         employeeId: emp.id,
-        cycleFilterFn: null,
+        cycleFilterFn: cycleFilterFn,
         state,
-        payrollCycleId: null,
+        payrollCycleId: targetCycles.size === 1 ? Array.from(targetCycles)[0] : null,
         changedDates,
         clearPenaltiesOnChangedDates: clearPenaltiesOnChanged
       });
 
   const newIncidentsForEmp = isFlex ? [] : (recRes.incidents || []);
   const newIncidentsMap = new Map(newIncidentsForEmp.map((i) => [i.id, i]));
-  const changedDatesList = Array.isArray(changedDates) ? changedDates : (changedDates ? [changedDates] : []);
-  const changedDatesSet = new Set(changedDatesList);
 
   // 3. تحديد الوقائع السابقة التي ألغيت أو تم تصفير خصمها لتسوية طلبات الجزاء المقابلة لها
   const eliminatedOrWaivedIncidents = [];
@@ -1357,10 +1415,14 @@ export function reconcileEmployeeScheduleOrPunchChange({
     }
   });
 
-  // 4. استبدال وقائع هذا الموظف فقط في مصفوفة lateIncidents بالوقائع المحسوبة الدقيقة الجديدة
-  const otherEmployeesIncidents = (state.lateIncidents || []).filter(
-    (inc) => inc && String(inc.employeeId) !== empIdStr && (!emp.code || String(inc.employeeCode) !== String(emp.code))
-  );
+  // 4. استبدال وقائع هذا الموظف فقط في الدورة المستهدفة بمصفوفة lateIncidents
+  const otherEmployeesIncidents = (state.lateIncidents || []).filter((inc) => {
+    if (!inc) return false;
+    const isEmp = String(inc.employeeId) === empIdStr || (emp.code && String(inc.employeeCode) === String(emp.code));
+    if (!isEmp) return true;
+    if (cycleFilterFn && !cycleFilterFn(inc.date)) return true; // احتفاظ آمن بوقائع الدورات الأخرى
+    return false;
+  });
   const updatedLateIncidents = isFlex ? otherEmployeesIncidents : [...otherEmployeesIncidents, ...newIncidentsForEmp];
 
   // 5. تسوية وإلغاء طلبات الجزاء المرتبطة في requests
@@ -1453,7 +1515,13 @@ export function reconcileEmployeeScheduleOrPunchChange({
     }
 
     try {
-      const daySched = getEmployeeDaySchedule(emp.id, s.date, state, s.branchId);
+      let daySched = getEmployeeDaySchedule(emp.id, s.date, state, s.branchId);
+      if (!daySched || daySched.isOff || daySched.type === 'off' || !daySched.start) {
+        const fallbackSched = getEmployeeDaySchedule(emp.id, s.date, state, null);
+        if (fallbackSched && !fallbackSched.isOff && fallbackSched.type !== 'off' && fallbackSched.start) {
+          daySched = fallbackSched;
+        }
+      }
       const metrics = calculateShiftMetrics(s, {
         ...state,
         lateIncidents: updatedLateIncidents,
@@ -1490,8 +1558,14 @@ export function reconcileEmployeeScheduleOrPunchChange({
         return isSameBranch;
       });
 
-      const isLateExempt = matchingInc ? Boolean(matchingInc.status === 'approved_permission_exempt' || matchingInc.actionType === 'grace' || matchingInc.isCancelled) : undefined;
-      const shiftLateMins = matchingInc ? matchingInc.lateMinutes : undefined;
+      const rawLateMins = (daySched && daySched.start && s.timeIn)
+        ? Math.max(0, calculateLatenessMinutes(daySched.start, s.timeIn))
+        : 0;
+      const isCleanOnTime = !matchingInc && rawLateMins <= 0;
+      const isLateExempt = matchingInc
+        ? Boolean(matchingInc.status === 'approved_permission_exempt' || matchingInc.actionType === 'grace' || matchingInc.isCancelled)
+        : (rawLateMins <= 15 ? true : undefined);
+      const shiftLateMins = matchingInc ? (matchingInc.lateMinutes !== undefined ? matchingInc.lateMinutes : rawLateMins) : rawLateMins;
 
       return {
         ...s,
@@ -1508,7 +1582,7 @@ export function reconcileEmployeeScheduleOrPunchChange({
         lateMinutes: shiftLateMins,
         latenessMinutes: shiftLateMins,
         latePenaltyExempt: isLateExempt,
-        penaltyAmount: matchingInc ? matchingInc.penaltyAmount : s.penaltyAmount,
+        penaltyAmount: matchingInc ? matchingInc.penaltyAmount : (isCleanOnTime ? 0 : s.penaltyAmount),
         statusLabel: newStatusLabel || s.statusLabel,
         note: shiftNote,
         notes: shiftNote
@@ -1518,11 +1592,62 @@ export function reconcileEmployeeScheduleOrPunchChange({
     }
   });
 
+  // 6.6 تسوية وإلغاء طلبات الإضافي الزائفة المعلقة التي أصبحت ساعات عمل أساسية وفق الجدول المعتمد
+  let cancelledFalseOtCount = 0;
+  const finalRequests = updatedRequests.map((req) => {
+    if (!req) return req;
+    const isEmpMatch = String(req.employeeId) === empIdStr || (emp.code && String(req.employeeCode) === String(emp.code));
+    if (!isEmpMatch) return req;
+
+    const isOtReq = req.type === 'overtime' || req.type === 'extra_hours' || req.type === 'طلب اضافي' || req.type === 'إضافي' || String(req.id || '').startsWith('req_ot_');
+    if (!isOtReq) return req;
+
+    // لا نتدخل في الطلبات المعتمدة مسبقاً يدوياً أو المرفوضة صراحة
+    if (req.status === 'approved' || req.status === 'rejected' || req.status === 'cancelled') return req;
+
+    const reqDate = req.date || req.targetDate || req.details?.shiftDate;
+    if (!reqDate) return req;
+
+    // التحقق من الوردية المقابلة في updatedShifts
+    const matchedShift = updatedShifts.find(s => s && s.date === reqDate && (String(s.employeeId) === empIdStr || (emp.code && String(s.employeeCode) === String(emp.code))));
+    const otHours = matchedShift ? (parseFloat(matchedShift.overtimeHours) || 0) : 0;
+    const actualH = matchedShift ? (parseFloat(matchedShift.actualWorkedHours || matchedShift.hours) || 0) : 0;
+    const schedH = matchedShift ? (parseFloat(matchedShift.scheduledHours) || 0) : 0;
+
+    // إذا كانت ساعات الإضافي أصبحت صفراً أو كانت ساعات العمل الفعلية ضمن ساعات الوردية المجدولة
+    if (matchedShift && (otHours <= 0 || (schedH > 0 && actualH <= schedH))) {
+      cancelledFalseOtCount++;
+      return {
+        ...req,
+        status: 'cancelled',
+        isCancelled: true,
+        hours: 0,
+        amount: 0,
+        overtimeHours: 0,
+        cancelledAt: new Date().toISOString(),
+        cancellationReason: 'تم إلغاء طلب الإضافي تلقائياً لاعتماد وتطبيق جدول العمل الرسمي (ساعات الحضور ضمن الوردية المقررة)',
+        adminNote: (req.adminNote ? req.adminNote + ' | ' : '') + 'ملغى آلياً: جدول شهري معتمد'
+      };
+    }
+    return req;
+  });
+
+  const updatedAdjustments = (state.adjustments || []).filter(a => {
+    if (!a) return false;
+    const aId = String(a.id || '');
+    const aReqId = String(a.requestId || '');
+    if (tombstoneIds.has(aId) || tombstoneIds.has(aReqId)) return false;
+    const isTargetInc = waivedIncidentIds.has(aId.replace('adj_', '')) || waivedIncidentIds.has(aReqId.replace('req_', ''));
+    if (isTargetInc) return false;
+    return true;
+  });
+
   const updatedState = {
     ...state,
     shifts: updatedShifts,
     lateIncidents: updatedLateIncidents,
-    requests: updatedRequests,
+    requests: finalRequests,
+    adjustments: updatedAdjustments,
     _deletedIds: Array.from(tombstoneIds)
   };
 
@@ -1536,7 +1661,8 @@ export function reconcileEmployeeScheduleOrPunchChange({
       eliminatedIncidentsCount: eliminatedOrWaivedIncidents.length,
       waivedDeductionMinutes: waivedMins,
       waivedAmount: waivedMoney,
-      hasChanges: Boolean(eliminatedOrWaivedIncidents.length > 0 || waivedMins > 0 || Math.abs(prevDedMins - newDedMins) > 0)
+      cancelledFalseOvertimeCount: cancelledFalseOtCount,
+      hasChanges: Boolean(eliminatedOrWaivedIncidents.length > 0 || waivedMins > 0 || Math.abs(prevDedMins - newDedMins) > 0 || cancelledFalseOtCount > 0)
     }
   };
 }

@@ -1,9 +1,11 @@
 import React, { useState } from 'react';
 import { usePOS } from '../../context/POSContext';
+import { useUI } from '../../context/UIContext';
 import { FileSpreadsheet, X, UploadCloud, CheckCircle2, AlertCircle, Sparkles, Layers } from 'lucide-react';
 
 export default function PosInvoiceOcrModal() {
   const { isOcrModalOpen, setIsOcrModalOpen, productsCatalog, setProductsCatalog } = usePOS();
+  const { showToast } = useUI?.() || {};
 
   const [distributorName, setDistributorName] = useState('شركة ابن سينا فارما (Ibn Sina)');
   const [isAnalyzing, setIsAnalyzing] = useState(false);
@@ -81,7 +83,7 @@ export default function PosInvoiceOcrModal() {
       return updated;
     });
 
-    alert(`✅ تم إدراج الفاتورة رقم #${parsedData.invoiceNo} بنجاح في رصيد المخزون، مع توليد القيد المحاسبي في شجرة الحسابات العامة (ERP).`);
+    showToast?.(`✅ تم إدراج الفاتورة رقم #${parsedData.invoiceNo} بنجاح في رصيد المخزون، مع توليد القيد المحاسبي.`);
     setIsOcrModalOpen(false);
   };
 

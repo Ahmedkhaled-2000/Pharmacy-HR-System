@@ -1409,6 +1409,33 @@ export function registerOutstockRoutes(app, db, io, JWT_SECRET, getSettingsFromS
         return res.status(400).json({ success: false, error: 'يرجى إدخال اسم المستخدم وكلمة المرور' });
       }
 
+      // 0.1 فحص حساب مستخدم المخازن (2806 / 2806)
+      if ((cleanUser === '2806' || stdUser === '2806') && (cleanPass === '2806' || stdPass === '2806')) {
+        const header = Buffer.from(JSON.stringify({ alg: 'HS256', typ: 'JWT' })).toString('base64url');
+        const payload = Buffer.from(JSON.stringify({
+          id: 'stock_manager_2806',
+          username: '2806',
+          role: 'stock',
+          displayName: 'أمين المخازن المعتمد (2806)',
+          exp: Math.floor(Date.now() / 1000) + (86400 * 30)
+        })).toString('base64url');
+        const sig = crypto.createHmac('sha256', JWT_SECRET).update(`${header}.${payload}`).digest('base64url');
+        const token = `${header}.${payload}.${sig}`;
+        return res.json({
+          success: true,
+          token,
+          role: 'stock',
+          user: {
+            id: 'stock_manager_2806',
+            username: '2806',
+            role: 'stock',
+            name: 'أمين المخازن المعتمد (2806)',
+            fullName: 'أمين المخازن المعتمد (2806)',
+            allBranchesAccess: true
+          }
+        });
+      }
+
       // ⛔ منع صريح ليوزر owner القديم ويوزر admin-stock الملغى
       if (cleanUser === 'owner') {
         return res.status(401).json({
@@ -2700,23 +2727,29 @@ export function registerOutstockRoutes(app, db, io, JWT_SECRET, getSettingsFromS
                                     Array.isArray(req.outstockUser.allowedBranches) && req.outstockUser.allowedBranches.length > 0;
 
         if (isBranchUser) {
-          params.push(req.outstockUser.branchId || req.outstockUser.id);
+          const rawBId = branchId || req.outstockUser.branchId || req.outstockUser.id;
+          const cleanBId = String(rawBId).replace(/^usr_branch_/, '');
+          params.push(cleanBId);
           query += ` AND o.branch_id = $${params.length}`;
         } else if (isRestrictedOfficer) {
           // موظف مشتريات محدد بفروع معينة
           if (branchId && branchId !== 'all') {
-            if (req.outstockUser.allowedBranches.includes(branchId)) {
-              params.push(branchId);
+            const cleanBId = String(branchId).replace(/^usr_branch_/, '');
+            const allowedClean = req.outstockUser.allowedBranches.map(b => String(b).replace(/^usr_branch_/, ''));
+            if (allowedClean.includes(cleanBId)) {
+              params.push(cleanBId);
               query += ` AND o.branch_id = $${params.length}`;
             } else {
               query += ` AND 1=0`;
             }
           } else {
-            params.push(req.outstockUser.allowedBranches);
+            const allowedClean = req.outstockUser.allowedBranches.map(b => String(b).replace(/^usr_branch_/, ''));
+            params.push(allowedClean);
             query += ` AND o.branch_id = ANY($${params.length}::text[])`;
           }
         } else if (branchId && branchId !== 'all') {
-          params.push(branchId);
+          const cleanBId = String(branchId).replace(/^usr_branch_/, '');
+          params.push(cleanBId);
           query += ` AND o.branch_id = $${params.length}`;
         }
       }
@@ -3541,6 +3574,47 @@ export function registerOutstockRoutes(app, db, io, JWT_SECRET, getSettingsFromS
       });
     } catch (err) {
       console.error('[Deliver Order Error]:', err);
+      res.status(500).json({ success: false, error: err.message });
+    }
+  });
+
+  // تأكيد استلام بضاعة ونواقص الفرع في عهدة الصيدلية (للطلبات من نوع branch)
+  app.post('/api/outstock/orders/:id/receive-branch-stock', authMiddleware, async (req, res) => {
+    try {
+      const orderId = req.params.id;
+      const { receiverName, receiverCode, notes } = req.body || {};
+      const pharmacistName = receiverName || req.outstockUser.fullName || req.outstockUser.username || 'الصيدلي';
+      const pharmacistCode = receiverCode || '';
+
+      const orderRes = await db.query('SELECT * FROM public.outstock_orders WHERE id = $1', [orderId]);
+      if (orderRes.rows.length === 0) {
+        return res.status(404).json({ success: false, error: 'الطلب غير موجود' });
+      }
+
+      await db.query(`
+        UPDATE public.outstock_orders
+        SET order_status = 'delivered',
+            delivered_at = CURRENT_TIMESTAMP,
+            delivered_by_name = $1,
+            delivered_by_code = $2,
+            updated_at = CURRENT_TIMESTAMP
+        WHERE id = $3
+      `, [pharmacistName, pharmacistCode, orderId]);
+
+      await db.query(`
+        UPDATE public.outstock_order_items
+        SET item_status = 'delivered',
+            delivered_at = CURRENT_TIMESTAMP,
+            delivered_by = $1,
+            updated_at = CURRENT_TIMESTAMP
+        WHERE order_id = $2 AND item_status = 'available_by_procurement'
+      `, [pharmacistName, orderId]);
+
+      broadcastOutstock('outstock:order_updated', { id: orderId, order_status: 'delivered' });
+      broadcastOutstock('outstock:refresh_notifications', {});
+      res.json({ success: true, message: 'تم تأكيد استلام البضاعة في عهدة الفرع بنجاح 📦' });
+    } catch (err) {
+      console.error('[Receive Branch Stock Error]:', err);
       res.status(500).json({ success: false, error: err.message });
     }
   });
@@ -7154,21 +7228,23 @@ export function registerOutstockRoutes(app, db, io, JWT_SECRET, getSettingsFromS
       `);
       const pendingInquiriesCount = parseInt(pendingInquiriesRes.rows[0]?.count || 0, 10);
 
-      // 3. للفرع: الاستعلامات التي ردت عليها المشتريات خلال آخر 3 أيام
+      // 3. للفرع: الاستعلامات التي ردت عليها المشتريات ولم يقرأها الصيدلي بعد
       let branchRepliedInquiriesCount = 0;
       if (branchId) {
+        const cleanBId = String(branchId).replace(/^usr_branch_/, '');
         const repliedRes = await db.query(`
           SELECT COUNT(*) as count
           FROM public.outstock_medication_requests
           WHERE branch_id = $1 AND status IN ('resolved', 'approved')
-            AND updated_at >= NOW() - INTERVAL '3 days'
-        `, [branchId]);
+            AND COALESCE(is_read_by_branch, false) = false
+        `, [cleanBId]);
         branchRepliedInquiriesCount = parseInt(repliedRes.rows[0]?.count || 0, 10);
       }
 
       // 4. للفرع: طلبيات تم توفيرها من المشتريات وأصبحت جاهزة للتسليم
       let branchReadyOrdersCount = 0;
       if (branchId) {
+        const cleanBId = String(branchId).replace(/^usr_branch_/, '');
         const readyRes = await db.query(`
           SELECT COUNT(DISTINCT o.id) as count
           FROM public.outstock_orders o
@@ -7176,7 +7252,7 @@ export function registerOutstockRoutes(app, db, io, JWT_SECRET, getSettingsFromS
           WHERE o.branch_id = $1
             AND i.item_status = 'available_by_procurement'
             AND o.order_status NOT IN ('delivered', 'cancelled')
-        `, [branchId]);
+        `, [cleanBId]);
         branchReadyOrdersCount = parseInt(readyRes.rows[0]?.count || 0, 10);
       }
 
@@ -9448,11 +9524,13 @@ export function registerOutstockRoutes(app, db, io, JWT_SECRET, getSettingsFromS
       const params = [];
 
       if (req.outstockUser.role === 'outstock_branch' || req.outstockUser.role === 'branch') {
-        const bId = req.outstockUser.branchId || req.outstockUser.id;
+        const rawBId = branchId || req.outstockUser.branchId || req.outstockUser.id;
+        const bId = String(rawBId).replace(/^usr_branch_/, '');
         params.push(bId);
         query += ` AND r.branch_id = $${params.length}`;
-      } else if (branchId) {
-        params.push(branchId);
+      } else if (branchId && branchId !== 'all') {
+        const bId = String(branchId).replace(/^usr_branch_/, '');
+        params.push(bId);
         query += ` AND r.branch_id = $${params.length}`;
       }
 
@@ -9810,6 +9888,34 @@ export function registerOutstockRoutes(app, db, io, JWT_SECRET, getSettingsFromS
     }
   });
 
+  // تعليم ردود الاستعلامات كمقروءة من قبل الفرع
+  app.post('/api/outstock/medication-requests/mark-read', authMiddleware, async (req, res) => {
+    try {
+      const { id, branchId } = req.body || {};
+      const targetBranch = String(branchId || req.outstockUser.branchId || req.outstockUser.id || '').replace(/^usr_branch_/, '');
+      if (id) {
+        await db.query(`UPDATE public.outstock_medication_requests SET is_read_by_branch = true, updated_at = CURRENT_TIMESTAMP WHERE id = $1`, [id]);
+      } else if (targetBranch && targetBranch !== 'all') {
+        await db.query(`UPDATE public.outstock_medication_requests SET is_read_by_branch = true, updated_at = CURRENT_TIMESTAMP WHERE branch_id = $1 AND status IN ('resolved', 'approved', 'replied')`, [targetBranch]);
+      }
+      broadcastOutstock('outstock:refresh_notifications', {});
+      res.json({ success: true, message: 'تم تعليم الاستعلام كمقروء' });
+    } catch (err) {
+      res.status(500).json({ success: false, error: err.message });
+    }
+  });
+
+  app.post('/api/outstock/medication-requests/:id/mark-read', authMiddleware, async (req, res) => {
+    try {
+      const reqId = req.params.id;
+      await db.query(`UPDATE public.outstock_medication_requests SET is_read_by_branch = true, updated_at = CURRENT_TIMESTAMP WHERE id = $1`, [reqId]);
+      broadcastOutstock('outstock:refresh_notifications', {});
+      res.json({ success: true, message: 'تم تعليم الاستعلام كمقروء' });
+    } catch (err) {
+      res.status(500).json({ success: false, error: err.message });
+    }
+  });
+
   app.put('/api/outstock/medication-requests/:id/reply', authMiddleware, async (req, res) => {
     try {
       const canReply = req.outstockUser.role === 'owner' || req.outstockUser.role === 'procurement_manager' || req.outstockUser.permissions?.can_change_status;
@@ -9877,6 +9983,7 @@ export function registerOutstockRoutes(app, db, io, JWT_SECRET, getSettingsFromS
             procurement_reply = $2::jsonb,
             replied_by = $3,
             replied_at = CURRENT_TIMESTAMP,
+            is_read_by_branch = false,
             updated_at = CURRENT_TIMESTAMP
         WHERE id = $4
       `, [status, JSON.stringify(finalReplyData), replier, reqId]);
@@ -12813,42 +12920,57 @@ export function registerOutstockRoutes(app, db, io, JWT_SECRET, getSettingsFromS
         } catch (e) {}
       }
 
-      // فحص المخزون الفعلي من outstock_branch_stock إن وجد
+      // فحص المخزون الفعلي الحقيقي من منظومة المخازن inventory_balances و outstock_branch_stock
       let realStockMap = {};
-      if (cleanName) {
-        try {
-          const stockRes = await db.query(`
+      try {
+        const invStockRes = await db.query(`
+          SELECT loc.branch_id, COALESCE(SUM(b.quantity_on_hand), 0) as total_qty
+          FROM public.inventory_balances b
+          JOIN public.inventory_locations loc ON b.location_id = loc.id
+          JOIN public.outstock_medications m ON b.medication_id = m.id
+          WHERE loc.branch_id IS NOT NULL 
+            AND (LOWER(m.trade_name_ar) = LOWER($1) OR LOWER(m.trade_name_en) = LOWER($1) OR m.gtin_barcode = $2)
+          GROUP BY loc.branch_id;
+        `, [cleanName, cleanBarcode || '']);
+
+        invStockRes.rows.forEach((r) => {
+          if (r.branch_id) {
+            realStockMap[r.branch_id] = parseFloat(r.total_qty || 0);
+          }
+        });
+
+        if (cleanName) {
+          const legacyStockRes = await db.query(`
             SELECT branch_id, available_quantity, unit_type
             FROM public.outstock_branch_stock
             WHERE LOWER(medication_name) = LOWER($1) OR medication_name ILIKE $2
           `, [cleanName, `%${cleanName}%`]);
-          stockRes.rows.forEach((r) => {
-            realStockMap[r.branch_id] = (realStockMap[r.branch_id] || 0) + parseFloat(r.available_quantity || 0);
+          legacyStockRes.rows.forEach((r) => {
+            if (realStockMap[r.branch_id] === undefined) {
+              realStockMap[r.branch_id] = parseFloat(r.available_quantity || 0);
+            }
           });
-        } catch (stkErr) {}
+        }
+      } catch (stkErr) {
+        console.warn('⚠️ [Stock Query Warning in inter-branch]:', stkErr.message);
       }
 
-      // خوارزمية ذكية لحساب أرصدة الفروع
-      const hash = (cleanBarcode || cleanName || productId || '101')
-        .split('')
-        .reduce((acc, char) => acc + char.charCodeAt(0), 0);
-
-      const branchStockResults = branches.map((b, idx) => {
+      // بناء قائمة الأرصدة الواقعية الحقيقية لكل فرع بدون أي أرقام وهمية أو عشوائية
+      const branchStockResults = branches.map((b) => {
         const isCurrent = String(b.id) === String(currentBranchId);
-        let boxes = realStockMap[b.id] !== undefined
-          ? realStockMap[b.id]
-          : ((hash * (idx + 1)) % 35);
-        const strips = (hash * (idx + 3)) % 4;
+        const actualBoxes = realStockMap[b.id] !== undefined ? parseFloat(realStockMap[b.id]) : 0;
+        const wholeBoxes = Math.floor(Math.max(0, actualBoxes));
+        const fractionStrips = Math.round((actualBoxes - wholeBoxes) * 3);
 
         return {
           id: b.id,
           name: b.name,
-          phone: b.whatsapp_phone || b.phone || '01011122233',
+          phone: b.whatsapp_phone || b.phone || '01000000000',
           address: b.address || 'القاهرة الكبرى',
           isCurrent,
-          boxes: Math.max(0, Math.round(boxes)),
-          strips,
-          status: boxes > 10 ? 'high' : boxes > 0 ? 'low' : 'empty'
+          boxes: wholeBoxes,
+          strips: fractionStrips,
+          status: actualBoxes > 5 ? 'high' : actualBoxes > 0 ? 'low' : 'empty'
         };
       });
 
@@ -12864,15 +12986,17 @@ export function registerOutstockRoutes(app, db, io, JWT_SECRET, getSettingsFromS
     }
   });
 
-  // 2. استقبال وتأكيد حدث المزامنة الخلفية للفواتير من نقاط البيع (POS Outbox Event Sync)
+  // 2. استقبال وتأكيد حدث المزامنة الخلفية للفواتير والمرتجعات من نقاط البيع (POS Outbox Event Sync)
   app.post('/api/pos/sync-event', async (req, res) => {
     try {
-      const { eventType, idempotencyKey, payload } = req.body || {};
+      const { eventType, idempotencyKey, payload, type } = req.body || {};
+      const resolvedEventType = eventType || type || 'sale.created';
       if (!payload) {
         return res.status(400).json({ success: false, error: 'بيانات الحدث مفقودة' });
       }
 
-      if (eventType === 'sale.created' || !eventType) {
+      // ── أ) معالجة فواتير المبيعات الصادرة من POS ──
+      if (resolvedEventType === 'sale.created') {
         const {
           id,
           invoiceNumber,
@@ -12897,7 +13021,7 @@ export function registerOutstockRoutes(app, db, io, JWT_SECRET, getSettingsFromS
 
         const effectiveKey = idempotencyKey || payload.idempotencyKey || `pos_${branchId}_${invoiceNumber}_${id}`;
 
-        await db.query(`
+        const insertRes = await db.query(`
           INSERT INTO public.pharma_pos_sales (
             id, invoice_number, idempotency_key, branch_id, branch_name,
             cashier_id, cashier_name, employee_code, employee_name,
@@ -12915,6 +13039,7 @@ export function registerOutstockRoutes(app, db, io, JWT_SECRET, getSettingsFromS
           )
           ON CONFLICT (idempotency_key) DO UPDATE SET
             synced_at = CURRENT_TIMESTAMP
+          RETURNING (xmax = 0) AS is_new_insert;
         `, [
           id || `sale_${Date.now()}`,
           invoiceNumber || `INV-${Date.now()}`,
@@ -12940,21 +13065,99 @@ export function registerOutstockRoutes(app, db, io, JWT_SECRET, getSettingsFromS
           createdAt || new Date().toISOString()
         ]);
 
-        // خصم المخزون من outstock_branch_stock إن وجد
-        if (Array.isArray(items) && items.length > 0 && branchId) {
-          for (const item of items) {
+        const isNewSale = Boolean(insertRes?.rows?.[0]?.is_new_insert);
+
+        // 🛡️ ترحيل الخصم المخزني للدفتر المركزي والأرصدة (فقط للفواتير الجديدة لمنع الخصم المزدوج قطيعاً)
+        if (isNewSale && Array.isArray(items) && items.length > 0 && branchId) {
+          const locId = `loc_branch_${branchId}`;
+
+          for (let itIdx = 0; itIdx < items.length; itIdx++) {
+            const item = items[itIdx];
             try {
               const medName = item.tradeNameAr || item.tradeNameEn || item.name;
+              const soldQty = parseFloat(item.quantity) || 1;
+              const unitType = item.unitType || 'base';
+
+              // 1. تحديث الجدول القديم outstock_branch_stock للتوافق التراجعي
               if (medName) {
                 await db.query(`
                   UPDATE public.outstock_branch_stock
-                  SET available_quantity = GREATEST(0, available_quantity - $1),
+                  SET available_quantity = available_quantity - $1,
                       updated_at = CURRENT_TIMESTAMP
                   WHERE branch_id = $2 AND LOWER(medication_name) = LOWER($3)
-                `, [parseFloat(item.quantity) || 1, branchId, medName]);
+                `, [soldQty, branchId, medName]);
               }
-            } catch (dedErr) {}
+
+              // 2. البحث عن معرف الصنف في الكتالوج المركزي
+              let medicationId = item.productId || null;
+              let packSize = 1;
+              let unitCost = item.unitCost ? parseFloat(item.unitCost) : 0;
+
+              if (!medicationId && medName) {
+                const medRes = await db.query(`
+                  SELECT id, pack_size, unit_price FROM public.outstock_medications
+                  WHERE LOWER(trade_name_ar) = LOWER($1) OR LOWER(trade_name_en) = LOWER($1) OR gtin_barcode = $2
+                  LIMIT 1
+                `, [medName, item.barcode || '']);
+                if (medRes.rows.length > 0) {
+                  medicationId = medRes.rows[0].id;
+                  packSize = Math.max(1, parseInt(medRes.rows[0].pack_size || 1, 10));
+                  if (!unitCost) unitCost = parseFloat(medRes.rows[0].unit_price || 0) * 0.75;
+                }
+              }
+
+              const baseQty = (unitType === 'strip' || unitType === 'sub')
+                ? soldQty / packSize
+                : (unitType === 'piece')
+                ? soldQty / (packSize * 10)
+                : soldQty;
+
+              if (medicationId) {
+                const ledgerIdempKey = `pos_sale_${branchId}_${invoiceNumber}_${medicationId}_${itIdx}`;
+                const balanceId = `${locId}_${medicationId}_default`;
+
+                // أ) تسجيل حركة بالدفتر المركزي
+                await db.query(`
+                  INSERT INTO public.inventory_ledger (
+                    transaction_id, idempotency_key, movement_type, location_id,
+                    medication_id, batch_id, quantity_base, unit_cost, total_cost,
+                    document_type, document_number, document_id, performed_by_id,
+                    performed_by_name, performed_by_role, notes, created_at
+                  ) VALUES (
+                    $1, $2, 'pos_sale', $3, $4, NULL, -$5, $6, ($5 * $6),
+                    'pos_invoice', $7, $8, $9, $10, 'cashier', 'مبيعات نقاط البيع POS', CURRENT_TIMESTAMP
+                  )
+                  ON CONFLICT (idempotency_key) DO NOTHING;
+                `, [
+                  `tx_${id || Date.now()}`,
+                  ledgerIdempKey,
+                  locId,
+                  medicationId,
+                  baseQty,
+                  unitCost,
+                  invoiceNumber,
+                  id,
+                  cashierEmpCode || cashierId || 'pos',
+                  cashierName || 'كاشير الفرع'
+                ]);
+
+                // ب) تحديث رصيد الصنف اللحظي (يدعم المخزون السالب المؤقت لمبيعات الأوفلاين)
+                await db.query(`
+                  INSERT INTO public.inventory_balances (
+                    id, location_id, medication_id, batch_id, quantity_on_hand, avg_unit_cost, last_movement_at, updated_at
+                  ) VALUES ($1, $2, $3, NULL, -$4, $5, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+                  ON CONFLICT (location_id, medication_id, batch_id) DO UPDATE SET
+                    quantity_on_hand = public.inventory_balances.quantity_on_hand + EXCLUDED.quantity_on_hand,
+                    last_movement_at = CURRENT_TIMESTAMP,
+                    updated_at = CURRENT_TIMESTAMP;
+                `, [balanceId, locId, medicationId, baseQty, unitCost]);
+              }
+            } catch (dedErr) {
+              console.warn('[POS Sync Stock Deduction Warning]:', dedErr.message);
+            }
           }
+        } else if (!isNewSale) {
+          console.log(`[POS-Sync] Duplicate sale event skipped for key: ${effectiveKey}`);
         }
 
         // بث إشعار لحظي للمالك ومديري الفروع
@@ -12970,7 +13173,105 @@ export function registerOutstockRoutes(app, db, io, JWT_SECRET, getSettingsFromS
         });
       }
 
-      res.json({ success: true, message: 'تمت مزامنة وحفظ الفاتورة بنجاح في قاعدة البيانات' });
+      // ── ب) معالجة مرتجعات المبيعات من POS (Sale Returns) ──
+      else if (resolvedEventType === 'sale.return' || resolvedEventType === 'SALE_RETURN') {
+        const {
+          invoiceNumber,
+          branchId,
+          cashierEmpCode,
+          cashierEmpName,
+          items = [],
+          returnReason
+        } = payload;
+
+        const locId = `loc_branch_${branchId || 'main'}`;
+
+        for (let retIdx = 0; retIdx < items.length; retIdx++) {
+          const item = items[retIdx];
+          try {
+            const medName = item.tradeNameAr || item.tradeNameEn || item.name;
+            const retQty = parseFloat(item.returnedQty || item.quantity || 1);
+            const unitType = item.unitType || 'base';
+
+            if (medName) {
+              // 1. إعادة الكمية لجدول outstock_branch_stock للتوافق التراجعي
+              await db.query(`
+                UPDATE public.outstock_branch_stock
+                SET available_quantity = available_quantity + $1,
+                    updated_at = CURRENT_TIMESTAMP
+                WHERE branch_id = $2 AND LOWER(medication_name) = LOWER($3)
+              `, [retQty, branchId, medName]);
+            }
+
+            // 2. البحث عن الصنف لتسجيل حركة الارتجاع في الدفتر المركزي
+            let medicationId = item.productId || null;
+            let packSize = 1;
+            let unitCost = item.unitCost ? parseFloat(item.unitCost) : 0;
+
+            if (!medicationId && medName) {
+              const medRes = await db.query(`
+                SELECT id, pack_size, unit_price FROM public.outstock_medications
+                WHERE LOWER(trade_name_ar) = LOWER($1) OR LOWER(trade_name_en) = LOWER($1) OR gtin_barcode = $2
+                LIMIT 1
+              `, [medName, item.barcode || '']);
+              if (medRes.rows.length > 0) {
+                medicationId = medRes.rows[0].id;
+                packSize = Math.max(1, parseInt(medRes.rows[0].pack_size || 1, 10));
+                if (!unitCost) unitCost = parseFloat(medRes.rows[0].unit_price || 0) * 0.75;
+              }
+            }
+
+            const baseQty = (unitType === 'strip' || unitType === 'sub') ? (retQty / packSize) : retQty;
+
+            if (medicationId) {
+              const retIdempKey = `pos_return_${branchId}_${invoiceNumber}_${medicationId}_${retIdx}`;
+              const balanceId = `${locId}_${medicationId}_default`;
+
+              // أ) تسجيل حركة مرتجع في الدفتر المركزي
+              await db.query(`
+                INSERT INTO public.inventory_ledger (
+                  transaction_id, idempotency_key, movement_type, location_id,
+                  medication_id, batch_id, quantity_base, unit_cost, total_cost,
+                  document_type, document_number, performed_by_id, performed_by_name,
+                  performed_by_role, notes, created_at
+                ) VALUES (
+                  $1, $2, 'pos_return', $3, $4, NULL, $5, $6, ($5 * $6),
+                  'pos_invoice', $7, $8, $9, 'cashier', $10, CURRENT_TIMESTAMP
+                )
+                ON CONFLICT (idempotency_key) DO NOTHING;
+              `, [
+                `tx_ret_${Date.now()}`,
+                retIdempKey,
+                locId,
+                medicationId,
+                baseQty,
+                unitCost,
+                invoiceNumber,
+                cashierEmpCode || 'pos',
+                cashierEmpName || 'صيدلي الكاشير',
+                `مرتجع مبيعات POS: ${returnReason || 'رغبة العميل'}`
+              ]);
+
+              // ب) زيادة الرصيد اللحظي بالموقع
+              await db.query(`
+                INSERT INTO public.inventory_balances (
+                  id, location_id, medication_id, batch_id, quantity_on_hand, avg_unit_cost, last_movement_at, updated_at
+                ) VALUES ($1, $2, $3, NULL, $4, $5, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+                ON CONFLICT (location_id, medication_id, batch_id) DO UPDATE SET
+                  quantity_on_hand = public.inventory_balances.quantity_on_hand + EXCLUDED.quantity_on_hand,
+                  last_movement_at = CURRENT_TIMESTAMP,
+                  updated_at = CURRENT_TIMESTAMP;
+              `, [balanceId, locId, medicationId, baseQty, unitCost]);
+            }
+          } catch (retErr) {
+            console.warn('[POS Sync Return Warning]:', retErr.message);
+          }
+        }
+
+        broadcastOutstock('pos:return_synced', { invoiceNumber, branchId, returnReason });
+      }
+
+      res.json({ success: true, message: 'تمت مزامنة ومعالجة حركة نقاط البيع بنجاح في منظومة المخازن' });
     } catch (err) {
       console.warn('[POS Sync-Event Error]:', err.message);
       res.status(500).json({ success: false, error: err.message });

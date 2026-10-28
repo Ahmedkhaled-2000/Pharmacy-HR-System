@@ -361,116 +361,284 @@ export default function ProcurementReplyModal({
               {replyNotes}
             </div>
 
-            {/* 📋 جدول الأصناف والأسعار المعتمدة وإمكانية التوفير 📋 */}
-            {(() => {
-              const itemsList = Array.isArray(replyData.items) && replyData.items.length > 0
-                ? replyData.items
-                : [{
-                    medicationName: requestItem.medication_name,
-                    quantity: requestItem.requested_quantity || 1,
-                    unit: requestItem.requested_unit === 'strip' ? 'شريط' : (requestItem.requested_unit === 'pack' ? 'علبة' : (requestItem.requested_unit || 'علبة')),
-                    price: replyData.approvedPrice || replyData.price || propData.public_price || null,
-                    isAvailable: replyData.isAvailable !== false,
-                    notes: replyData.substitutes || ''
-                  }];
-
-              const totalEstimated = itemsList.reduce((acc, it) => {
-                const p = parseFloat(it.price || 0);
-                const q = parseInt(it.quantity || 1, 10);
-                return acc + (p * q);
-              }, 0);
-
-              const deposit = parseFloat(requestItem.deposit_amount || 0);
-              const remaining = Math.max(0, totalEstimated - deposit);
-
-              return (
-                <div style={{ background: '#ffffff', border: '1px solid #cbd5e1', borderRadius: '12px', overflow: 'hidden', marginBottom: '14px' }}>
-                  <div style={{ background: '#f8fafc', padding: '10px 14px', borderBottom: '1px solid #e2e8f0', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: '6px', fontWeight: 800, fontSize: '12.5px', color: '#0f172a' }}>
-                      <Pill size={15} color="#0284c7" />
-                      <span>جدول الأصناف والأسعار المعتمدة وإمكانية التوفير:</span>
-                    </div>
-                    <span style={{ fontSize: '11px', color: '#64748b', fontWeight: 700 }}>
-                      عدد الأصناف: {itemsList.length}
-                    </span>
+            {/* 📋 العرض المخصص حسب نوع المعاملة: تصحيح / صنف جديد / استعلام 📋 */}
+            {requestItem.request_type === 'correction' ? (
+              /* ── نموذج عرض طلب تصحيح بيانات الصنف (مقارنة القديم بالجديد) ── */
+              <div style={{ background: '#ffffff', border: '1px solid #cbd5e1', borderRadius: '12px', overflow: 'hidden', marginBottom: '14px' }}>
+                <div style={{ background: '#f8fafc', padding: '10px 14px', borderBottom: '1px solid #e2e8f0', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '6px', fontWeight: 800, fontSize: '13px', color: '#0f172a' }}>
+                    <Tag size={15} color="#d97706" />
+                    <span>جدول مقارنة البيانات: (البند القديم المخزن ↔ البند الجديد المراد تعديله)</span>
                   </div>
-
-                  <div style={{ overflowX: 'auto' }}>
-                    <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '12px', textAlign: 'right' }}>
-                      <thead>
-                        <tr style={{ background: '#f1f5f9', color: '#475569', borderBottom: '1px solid #cbd5e1' }}>
-                          <th style={{ padding: '8px 12px', fontWeight: 800 }}>الصنف</th>
-                          <th style={{ padding: '8px 10px', fontWeight: 800, textAlign: 'center' }}>الكمية</th>
-                          <th style={{ padding: '8px 12px', fontWeight: 800, textAlign: 'center' }}>السعر المحدد</th>
-                          <th style={{ padding: '8px 12px', fontWeight: 800, textAlign: 'center' }}>إمكانية التوفير</th>
-                          <th style={{ padding: '8px 12px', fontWeight: 800 }}>ملاحظات / البديل</th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {itemsList.map((itemRow, idx) => {
-                          const p = itemRow.price !== undefined && itemRow.price !== null && itemRow.price !== '' ? parseFloat(itemRow.price) : null;
-                          const avail = itemRow.isAvailable !== false;
-                          return (
-                            <tr key={idx} style={{ borderBottom: '1px solid #f1f5f9' }}>
-                              <td style={{ padding: '10px 12px', fontWeight: 700, color: '#0f172a' }}>
-                                {itemRow.medicationName || requestItem.medication_name}
-                              </td>
-                              <td style={{ padding: '10px 10px', textAlign: 'center', color: '#334155', fontWeight: 600 }}>
-                                {itemRow.quantity || 1} {itemRow.unit || 'علبة'}
-                              </td>
-                              <td style={{ padding: '10px 12px', textAlign: 'center' }}>
-                                {p !== null ? (
-                                  <span style={{ fontWeight: 800, color: '#15803d', background: '#dcfce7', padding: '3px 8px', borderRadius: '6px', display: 'inline-block' }}>
-                                    {p.toFixed(2)} ج.م
-                                  </span>
-                                ) : (
-                                  <span style={{ color: '#94a3b8', fontStyle: 'italic' }}>غير محدد</span>
-                                )}
-                              </td>
-                              <td style={{ padding: '10px 12px', textAlign: 'center' }}>
-                                {avail ? (
-                                  <span style={{ background: '#ecfdf5', color: '#059669', border: '1px solid #a7f3d0', padding: '3px 8px', borderRadius: '6px', fontWeight: 800, fontSize: '11px', display: 'inline-flex', alignItems: 'center', gap: '3px' }}>
-                                    <span>متاح للتوفير 🟢</span>
-                                  </span>
-                                ) : (
-                                  <span style={{ background: '#fef2f2', color: '#dc2626', border: '1px solid #fecaca', padding: '3px 8px', borderRadius: '6px', fontWeight: 800, fontSize: '11px', display: 'inline-flex', alignItems: 'center', gap: '3px' }}>
-                                    <span>غير متوفر 🔴</span>
-                                  </span>
-                                )}
-                              </td>
-                              <td style={{ padding: '10px 12px', color: '#64748b', fontSize: '11.5px' }}>
-                                {itemRow.notes || '—'}
-                              </td>
-                            </tr>
-                          );
-                        })}
-                      </tbody>
-                    </table>
-                  </div>
-
-                  {/* شريط الإجماليات المالية والعربون */}
-                  <div style={{ background: '#f8fafc', padding: '10px 14px', borderTop: '1px solid #e2e8f0', display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: '10px', fontSize: '12px' }}>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: '14px', flexWrap: 'wrap' }}>
-                      {totalEstimated > 0 && (
-                        <div>
-                          إجمالي القيمة: <strong style={{ color: '#0f172a' }}>{totalEstimated.toFixed(2)} ج.م</strong>
-                        </div>
-                      )}
-                      {deposit > 0 && (
-                        <div>
-                          العربون المسلم: <strong style={{ color: '#166534' }}>{deposit.toFixed(2)} ج.م</strong>
-                        </div>
-                      )}
-                      {totalEstimated > 0 && (
-                        <div style={{ color: '#b45309', fontWeight: 800 }}>
-                          المتبقي عند الاستلام: <span style={{ color: '#c2410c' }}>{remaining.toFixed(2)} ج.م</span>
-                        </div>
-                      )}
-                    </div>
-                  </div>
+                  <span style={{ fontSize: '11px', fontWeight: 800, color: isApproved ? '#15803d' : isRejected ? '#b91c1c' : '#b45309', background: isApproved ? '#dcfce7' : isRejected ? '#fee2e2' : '#fef3c7', padding: '2px 8px', borderRadius: '6px' }}>
+                    {isApproved ? 'تم التعديل والاعتماد بالكتالوج' : isRejected ? 'التعديل المرسل خطأ' : 'قيد المراجعة والتدقيق'}
+                  </span>
                 </div>
-              );
-            })()}
+
+                {isRejected && (
+                  <div style={{ background: '#fef2f2', borderBottom: '1px solid #fecaca', padding: '10px 14px', fontSize: '12.5px', color: '#991b1b', display: 'flex', alignItems: 'center', gap: '8px' }}>
+                    <AlertCircle size={16} color="#ef4444" style={{ flexShrink: 0 }} />
+                    <div>
+                      <strong>سبب خطأ التعديل: </strong>
+                      <span>{replyNotes || 'البيانات المرسلة غير متطابقة مع تسعيرة هيئة الدواء'}</span>
+                    </div>
+                  </div>
+                )}
+
+                {(() => {
+                  const oldV = propData.old_values || {};
+                  const newV = propData.new_values || propData || {};
+                  const isCosm = requestItem.item_type === 'cosmetics';
+
+                  const fields = isCosm ? [
+                    { id: 'trade_name_ar', label: 'الاسم التجاري (عربي)' },
+                    { id: 'trade_name_en', label: 'الاسم التجاري (إنجليزي)' },
+                    { id: 'brand', label: 'الماركة / البراند' },
+                    { id: 'category', label: 'التصنيف' },
+                    { id: 'skin_type', label: 'نوع البشرة / الاستخدام' },
+                    { id: 'public_price', label: 'سعر الجمهور الرسمي (ج.م)', isPrice: true },
+                    { id: 'size_volume', label: 'الحجم / السعة' },
+                    { id: 'manufacturer', label: 'الشركة / بلد المنشأ' },
+                    { id: 'barcode', label: 'الباركود الدولي' }
+                  ] : [
+                    { id: 'trade_name_ar', label: 'الاسم التجاري (عربي)' },
+                    { id: 'trade_name_en', label: 'الاسم التجاري (إنجليزي)' },
+                    { id: 'invoice_display_name', label: 'الاسم المختصر بالفاتورة' },
+                    { id: 'public_price', label: 'سعر الجمهور الرسمي (ج.م)', isPrice: true },
+                    { id: 'dosage_form', label: 'الشكل الدوائي' },
+                    { id: 'pack_size', label: 'حجم العبوة (الوحدات)' },
+                    { id: 'unit_name', label: 'وحدة البيع' },
+                    { id: 'strength', label: 'التركيز' },
+                    { id: 'active_ingredient', label: 'المادة الفعالة' },
+                    { id: 'manufacturer', label: 'الشركة المصنعة' },
+                    { id: 'barcode', label: 'الباركود الدولي' }
+                  ];
+
+                  return (
+                    <div style={{ overflowX: 'auto' }}>
+                      <table className="outstock-diff-table" style={{ width: '100%', borderCollapse: 'collapse', fontSize: '12px', textAlign: 'right' }}>
+                        <thead>
+                          <tr style={{ background: '#f1f5f9', color: '#475569', borderBottom: '1px solid #cbd5e1' }}>
+                            <th style={{ padding: '8px 12px', fontWeight: 800 }}>البند والمواصفة</th>
+                            <th style={{ padding: '8px 12px', fontWeight: 800, color: '#64748b' }}>البند القديم المخزن بالنظام</th>
+                            <th style={{ padding: '8px 12px', fontWeight: 800, color: '#0369a1' }}>البند الجديد المراد تعديله</th>
+                            <th style={{ padding: '8px 8px', fontWeight: 800, textAlign: 'center', width: '70px' }}>الحالة</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {fields.map((f) => {
+                            const oldVal = oldV[f.id] !== undefined && oldV[f.id] !== null && oldV[f.id] !== '' ? String(oldV[f.id]) : '—';
+                            const newVal = newV[f.id] !== undefined && newV[f.id] !== null && newV[f.id] !== '' ? String(newV[f.id]) : (newV[f.id.replace('_name', '')] ? String(newV[f.id.replace('_name', '')]) : '—');
+                            const isChanged = newVal !== '—' && oldVal !== '—' && oldVal !== newVal;
+                            return (
+                              <tr key={f.id} style={{ borderBottom: '1px solid #f1f5f9', background: isChanged ? '#f0fdf4' : 'transparent' }}>
+                                <td style={{ padding: '8px 12px', fontWeight: 700, color: '#1e293b' }}>
+                                  {f.label}
+                                </td>
+                                <td style={{ padding: '8px 12px', color: '#64748b' }}>
+                                  <span className="outstock-diff-old-val">
+                                    {f.isPrice && oldVal !== '—' ? `${parseFloat(oldVal).toFixed(2)} ج.م` : oldVal}
+                                  </span>
+                                </td>
+                                <td style={{ padding: '8px 12px' }}>
+                                  <span className="outstock-diff-new-val" style={{ fontWeight: isChanged ? 800 : 600, color: isChanged ? '#047857' : '#1d4ed8', background: isChanged ? '#ecfdf5' : '#eff6ff', borderColor: isChanged ? '#86efac' : '#bfdbfe' }}>
+                                    {f.isPrice && newVal !== '—' ? `${parseFloat(newVal).toFixed(2)} ج.م` : newVal}
+                                  </span>
+                                </td>
+                                <td style={{ padding: '8px 8px', textAlign: 'center' }}>
+                                  {isChanged ? (
+                                    <span style={{ fontSize: '10.5px', background: '#dcfce7', color: '#15803d', padding: '2px 6px', borderRadius: '4px', fontWeight: 800 }}>
+                                      معدل ✨
+                                    </span>
+                                  ) : (
+                                    <span style={{ fontSize: '10.5px', color: '#94a3b8' }}>
+                                      مطابق
+                                    </span>
+                                  )}
+                                </td>
+                              </tr>
+                            );
+                          })}
+                        </tbody>
+                      </table>
+                    </div>
+                  );
+                })()}
+              </div>
+            ) : requestItem.request_type === 'new_item' ? (
+              /* ── نموذج عرض طلب إضافة صنف جديد كلياً (Master Card كاملة) ── */
+              <div style={{ background: '#ffffff', border: '1px solid #cbd5e1', borderRadius: '12px', overflow: 'hidden', marginBottom: '14px' }}>
+                <div style={{ background: '#f8fafc', padding: '10px 14px', borderBottom: '1px solid #e2e8f0', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '6px', fontWeight: 800, fontSize: '13px', color: '#0f172a' }}>
+                    <Pill size={15} color="#15803d" />
+                    <span>كارتة الصنف الكاملة (Master Card):</span>
+                  </div>
+                  <span style={{ fontSize: '11px', fontWeight: 800, color: isApproved ? '#15803d' : isRejected ? '#b91c1c' : '#0369a1', background: isApproved ? '#dcfce7' : isRejected ? '#fee2e2' : '#e0f2fe', padding: '2px 8px', borderRadius: '6px' }}>
+                    {isApproved ? 'معتمد ومضاف بالكتالوج المركزي' : isRejected ? 'طلب مرفوض' : 'في انتظار اعتماد المشتريات'}
+                  </span>
+                </div>
+
+                <div style={{ padding: '14px', display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '12px', fontSize: '12.5px' }}>
+                  <div>
+                    <span style={{ color: '#64748b', fontSize: '11px', display: 'block' }}>الاسم التجاري (إنجليزي):</span>
+                    <strong style={{ color: '#0f172a' }}>{propData.trade_name_en || propData.tradeName || requestItem.medication_name || '—'}</strong>
+                  </div>
+                  <div>
+                    <span style={{ color: '#64748b', fontSize: '11px', display: 'block' }}>الاسم بالعربي:</span>
+                    <strong style={{ color: '#0f172a' }}>{propData.trade_name_ar || propData.arabicName || '—'}</strong>
+                  </div>
+                  <div>
+                    <span style={{ color: '#64748b', fontSize: '11px', display: 'block' }}>سعر الجمهور الرسمي:</span>
+                    <strong style={{ color: '#15803d', fontSize: '14px' }}>
+                      {propData.public_price || propData.price ? `${parseFloat(propData.public_price || propData.price).toFixed(2)} ج.م` : 'غير محدد'}
+                    </strong>
+                  </div>
+                  <div>
+                    <span style={{ color: '#64748b', fontSize: '11px', display: 'block' }}>الشكل الدوائي:</span>
+                    <strong style={{ color: '#1e293b' }}>{propData.dosage_form || propData.dosageForm || '—'}</strong>
+                  </div>
+                  <div>
+                    <span style={{ color: '#64748b', fontSize: '11px', display: 'block' }}>حجم العبوة والوحدة:</span>
+                    <strong style={{ color: '#1e293b' }}>
+                      {propData.pack_size || propData.packSize || 1} {propData.unit_name || propData.unitName || 'علبة'}
+                    </strong>
+                  </div>
+                  <div>
+                    <span style={{ color: '#64748b', fontSize: '11px', display: 'block' }}>التركيز:</span>
+                    <strong style={{ color: '#1e293b' }}>{propData.strength || '—'}</strong>
+                  </div>
+                  <div>
+                    <span style={{ color: '#64748b', fontSize: '11px', display: 'block' }}>المادة الفعالة:</span>
+                    <strong style={{ color: '#0284c7' }}>{propData.active_ingredient || propData.activeIngredients || '—'}</strong>
+                  </div>
+                  <div>
+                    <span style={{ color: '#64748b', fontSize: '11px', display: 'block' }}>الشركة المصنعة / الموزع:</span>
+                    <strong style={{ color: '#1e293b' }}>{propData.manufacturer || propData.company || '—'}</strong>
+                  </div>
+                  <div>
+                    <span style={{ color: '#64748b', fontSize: '11px', display: 'block' }}>الباركود الدولي:</span>
+                    <strong style={{ fontFamily: 'monospace', color: '#475569' }}>{propData.barcode || '—'}</strong>
+                  </div>
+                  {propData.storage_condition && (
+                    <div>
+                      <span style={{ color: '#64748b', fontSize: '11px', display: 'block' }}>ظروف التخزين:</span>
+                      <strong style={{ color: '#1e293b' }}>{propData.storage_condition === 'fridge' ? 'ثلاجة (2-8 درجات مئوية) ❄️' : 'درجة حرارة الغرفة (أقل من 30م)'}</strong>
+                    </div>
+                  )}
+                </div>
+              </div>
+            ) : (
+              /* ── نموذج عرض طلب استعلام السعر والتوفر والعربون ── */
+              (() => {
+                const itemsList = Array.isArray(replyData.items) && replyData.items.length > 0
+                  ? replyData.items
+                  : [{
+                      medicationName: requestItem.medication_name,
+                      quantity: requestItem.requested_quantity || 1,
+                      unit: requestItem.requested_unit === 'strip' ? 'شريط' : (requestItem.requested_unit === 'pack' ? 'علبة' : (requestItem.requested_unit || 'علبة')),
+                      price: replyData.approvedPrice || replyData.price || propData.public_price || null,
+                      isAvailable: replyData.isAvailable !== false,
+                      notes: replyData.substitutes || ''
+                    }];
+
+                const totalEstimated = itemsList.reduce((acc, it) => {
+                  const p = parseFloat(it.price || 0);
+                  const q = parseInt(it.quantity || 1, 10);
+                  return acc + (p * q);
+                }, 0);
+
+                const deposit = parseFloat(requestItem.deposit_amount || 0);
+                const remaining = Math.max(0, totalEstimated - deposit);
+
+                return (
+                  <div style={{ background: '#ffffff', border: '1px solid #cbd5e1', borderRadius: '12px', overflow: 'hidden', marginBottom: '14px' }}>
+                    <div style={{ background: '#f8fafc', padding: '10px 14px', borderBottom: '1px solid #e2e8f0', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '6px', fontWeight: 800, fontSize: '12.5px', color: '#0f172a' }}>
+                        <Pill size={15} color="#0284c7" />
+                        <span>جدول الأصناف والأسعار المعتمدة وإمكانية التوفير:</span>
+                      </div>
+                      <span style={{ fontSize: '11px', color: '#64748b', fontWeight: 700 }}>
+                        عدد الأصناف: {itemsList.length}
+                      </span>
+                    </div>
+
+                    <div style={{ overflowX: 'auto' }}>
+                      <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '12px', textAlign: 'right' }}>
+                        <thead>
+                          <tr style={{ background: '#f1f5f9', color: '#475569', borderBottom: '1px solid #cbd5e1' }}>
+                            <th style={{ padding: '8px 12px', fontWeight: 800 }}>الصنف</th>
+                            <th style={{ padding: '8px 10px', fontWeight: 800, textAlign: 'center' }}>الكمية</th>
+                            <th style={{ padding: '8px 12px', fontWeight: 800, textAlign: 'center' }}>السعر المحدد</th>
+                            <th style={{ padding: '8px 12px', fontWeight: 800, textAlign: 'center' }}>إمكانية التوفير</th>
+                            <th style={{ padding: '8px 12px', fontWeight: 800 }}>ملاحظات / البديل</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {itemsList.map((itemRow, idx) => {
+                            const p = itemRow.price !== undefined && itemRow.price !== null && itemRow.price !== '' ? parseFloat(itemRow.price) : null;
+                            const avail = itemRow.isAvailable !== false;
+                            return (
+                              <tr key={idx} style={{ borderBottom: '1px solid #f1f5f9' }}>
+                                <td style={{ padding: '10px 12px', fontWeight: 700, color: '#0f172a' }}>
+                                  {itemRow.medicationName || requestItem.medication_name}
+                                </td>
+                                <td style={{ padding: '10px 10px', textAlign: 'center', color: '#334155', fontWeight: 600 }}>
+                                  {itemRow.quantity || 1} {itemRow.unit || 'علبة'}
+                                </td>
+                                <td style={{ padding: '10px 12px', textAlign: 'center' }}>
+                                  {p !== null ? (
+                                    <span style={{ fontWeight: 800, color: '#15803d', background: '#dcfce7', padding: '3px 8px', borderRadius: '6px', display: 'inline-block' }}>
+                                      {p.toFixed(2)} ج.م
+                                    </span>
+                                  ) : (
+                                    <span style={{ color: '#94a3b8', fontStyle: 'italic' }}>غير محدد</span>
+                                  )}
+                                </td>
+                                <td style={{ padding: '10px 12px', textAlign: 'center' }}>
+                                  {avail ? (
+                                    <span style={{ background: '#ecfdf5', color: '#059669', border: '1px solid #a7f3d0', padding: '3px 8px', borderRadius: '6px', fontWeight: 800, fontSize: '11px', display: 'inline-flex', alignItems: 'center', gap: '3px' }}>
+                                      <span>متاح للتوفير 🟢</span>
+                                    </span>
+                                  ) : (
+                                    <span style={{ background: '#fef2f2', color: '#dc2626', border: '1px solid #fecaca', padding: '3px 8px', borderRadius: '6px', fontWeight: 800, fontSize: '11px', display: 'inline-flex', alignItems: 'center', gap: '3px' }}>
+                                      <span>غير متوفر 🔴</span>
+                                    </span>
+                                  )}
+                                </td>
+                                <td style={{ padding: '10px 12px', color: '#64748b', fontSize: '11.5px' }}>
+                                  {itemRow.notes || '—'}
+                                </td>
+                              </tr>
+                            );
+                          })}
+                        </tbody>
+                      </table>
+                    </div>
+
+                    {/* شريط الإجماليات المالية والعربون */}
+                    <div style={{ background: '#f8fafc', padding: '10px 14px', borderTop: '1px solid #e2e8f0', display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: '10px', fontSize: '12px' }}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '14px', flexWrap: 'wrap' }}>
+                        {totalEstimated > 0 && (
+                          <div>
+                            إجمالي القيمة: <strong style={{ color: '#0f172a' }}>{totalEstimated.toFixed(2)} ج.م</strong>
+                          </div>
+                        )}
+                        {deposit > 0 && (
+                          <div>
+                            العربون المسلم: <strong style={{ color: '#166534' }}>{deposit.toFixed(2)} ج.م</strong>
+                          </div>
+                        )}
+                        {totalEstimated > 0 && (
+                          <div style={{ color: '#b45309', fontWeight: 800 }}>
+                            المتبقي عند الاستلام: <span style={{ color: '#c2410c' }}>{remaining.toFixed(2)} ج.م</span>
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+                );
+              })()
+            )}
 
             {/* توقيع المسؤول القائم بالرد */}
             <div

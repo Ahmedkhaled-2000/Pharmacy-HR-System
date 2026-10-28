@@ -181,5 +181,103 @@ export async function saveUnifiedCustomer(customerData, branchId = 'main') {
   };
 
   updateLocalCustomerCache(fallbackCustomer);
+
+  // إدراج العميل الجديد في طابور المزامنة الـ Outbox لرفعه للسيرفر فور عودة الاتصال
+  try {
+    const outboxRaw = localStorage.getItem('pharma_pos_sync_outbox');
+    const outbox = outboxRaw ? JSON.parse(outboxRaw) : [];
+    outbox.push({
+      id: `outbox_cust_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
+      type: 'CUSTOMER_CREATE',
+      endpoint: '/api/outstock/customers',
+      payload,
+      createdAt: new Date().toISOString()
+    });
+    localStorage.setItem('pharma_pos_sync_outbox', JSON.stringify(outbox));
+  } catch (e) {}
+
   return { success: true, customer: fallbackCustomer, isOffline: true };
 }
+
+/**
+ * خصم رصيد من محفظة العميل عند الشراء من الـ POS
+ * يحدث الكاش المحلي ويرسل طلب التحديث للباك إند أو يضيفه للـ Outbox أوفلاين
+ */
+export async function deductCustomerWallet({
+  customerId,
+  amount,
+  invoiceNumber = '',
+  employeeCode = '101',
+  employeeName = 'صيدلي الكاشير',
+  branchId = 'main',
+  branchName = 'الفرع الرئيسي'
+}) {
+  const deductVal = Math.abs(parseFloat(amount || 0));
+  if (!customerId || deductVal <= 0) return { success: false, reason: 'invalid_amount_or_customer' };
+
+  // 1. تحديث فوري للكاش المحلي للعملاء
+  try {
+    const raw = localStorage.getItem(LOCAL_STORAGE_KEY);
+    if (raw) {
+      let list = JSON.parse(raw);
+      const idx = list.findIndex(c => String(c.id) === String(customerId));
+      if (idx >= 0) {
+        const currentBal = parseFloat(list[idx].walletBalance ?? list[idx].wallet_balance ?? 0);
+        const newBal = Math.max(0, parseFloat((currentBal - deductVal).toFixed(2)));
+        list[idx].walletBalance = newBal;
+        list[idx].wallet_balance = newBal;
+        localStorage.setItem(LOCAL_STORAGE_KEY, JSON.stringify(list));
+      }
+    }
+  } catch (e) {
+    console.warn('Failed to deduct from local customer wallet cache:', e);
+  }
+
+  const payload = {
+    amount: deductVal,
+    type: 'withdraw',
+    paymentMethod: 'wallet',
+    notes: `خصم من محفظة العميل لسداد فاتورة POS #${invoiceNumber}`,
+    employeeCode,
+    employeeName,
+    branchId,
+    branchName,
+    verificationMethod: 'employee_code'
+  };
+
+  // 2. إرسال طلب التحديث الذري للباك إند
+  try {
+    const res = await fetch(`/api/outstock/customers/${encodeURIComponent(customerId)}/wallet/adjust`, {
+      method: 'POST',
+      headers: getHeaders(),
+      body: JSON.stringify(payload),
+      signal: AbortSignal.timeout(5000)
+    });
+    if (res.ok) {
+      const data = await res.json();
+      if (data.customer) {
+        updateLocalCustomerCache(data.customer);
+      }
+      return { success: true, isOnline: true };
+    }
+  } catch (err) {
+    console.warn('Network wallet adjust failed, queueing for outbox sync:', err);
+  }
+
+  // 3. في حال انقطاع الشبكة، إدراج العملية في طابور الـ Outbox للمزامنة التلقائية
+  try {
+    const outboxRaw = localStorage.getItem('pharma_pos_sync_outbox');
+    const outbox = outboxRaw ? JSON.parse(outboxRaw) : [];
+    outbox.push({
+      id: `outbox_wallet_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
+      type: 'WALLET_ADJUST',
+      endpoint: `/api/outstock/customers/${encodeURIComponent(customerId)}/wallet/adjust`,
+      payload,
+      createdAt: new Date().toISOString()
+    });
+    localStorage.setItem('pharma_pos_sync_outbox', JSON.stringify(outbox));
+  } catch (e) {}
+
+  return { success: true, isOffline: true };
+}
+

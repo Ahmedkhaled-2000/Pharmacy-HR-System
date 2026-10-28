@@ -181,14 +181,14 @@ export default function ApprovalCenterModule({
   const pendingRequestsList = filteredRequests.filter(req => {
     if (!req) return false;
     if (req.status === 'rejected' || req.status === 'cancelled') return false;
-    if (req.status === 'approved' && req.adminApproved) return false;
+    if (req.status === 'approved' || req.adminApproved === true) return false;
     if (currentRole === 'branch') {
       return !req.branchApproved && (req.status === 'pending' || !req.status);
     }
     if (currentRole === 'admin' || currentRole === 'owner') {
-      return !req.adminApproved;
+      return !req.adminApproved && req.status !== 'approved';
     }
-    return req.status === 'pending' || req.status === 'pending_admin' || !req.adminApproved;
+    return req.status === 'pending' || req.status === 'pending_admin';
   });
 
   const handleAddRule = () => {
@@ -420,6 +420,7 @@ export default function ApprovalCenterModule({
                       req.status === 'partial' ||
                       req.status === 'rejected' ||
                       req.status === 'cancelled' ||
+                      req.adminApproved === true ||
                       (currentRole === 'branch' ? (isBranchApproved || req.branchRejected) : (isAdminApproved || req.adminRejected));
 
                     if (isDecided) return null;

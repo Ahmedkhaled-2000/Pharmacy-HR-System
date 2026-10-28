@@ -211,8 +211,20 @@ export async function outstockGetOrders(params = {}) {
   const res = await outstockRequest(`orders?${qs.toString()}`, { method: 'GET' });
   if (res?.success && Array.isArray(res.orders)) {
     if (params.branchId && !params.orderType && !params.dateFrom && !params.transferredOnly) {
-      cacheOrders(params.branchId, res.orders);
-      return { success: true, orders: getCachedOrders(params.branchId) };
+      try {
+        cacheOrders(params.branchId, res.orders);
+      } catch (_) {}
+      try {
+        const cached = getCachedOrders(params.branchId);
+        if (Array.isArray(cached) && cached.length > 0) {
+          const offlineOnly = cached.filter(o => o.is_offline_pending);
+          if (offlineOnly.length > 0) {
+            const serverIds = new Set(res.orders.map(o => o.id));
+            const pendingToAdd = offlineOnly.filter(o => !serverIds.has(o.id));
+            return { ...res, orders: [...pendingToAdd, ...res.orders] };
+          }
+        }
+      } catch (_) {}
     }
     return res;
   }
@@ -301,6 +313,13 @@ export async function outstockDeliverOrder(orderId, settlementData = {}) {
 }
 
 export const outstockSettleAndDeliverOrder = outstockDeliverOrder;
+
+export async function outstockReceiveBranchStockOrder(orderId, payload = {}) {
+  return await outstockRequest(`orders/${orderId}/receive-branch-stock`, {
+    method: 'POST',
+    body: JSON.stringify(payload)
+  });
+}
 
 export async function outstockCancelOrderItem(orderId, payload = {}) {
   return await outstockRequest(`orders/${orderId}/cancel-item`, {
@@ -683,6 +702,20 @@ export async function outstockConvertMedicationRequestToOrder(id, payload = {}) 
   return await outstockRequest(`medication-requests/${id}/convert-to-order`, {
     method: 'POST',
     body: JSON.stringify(payload)
+  });
+}
+
+export async function outstockMarkMedicationRequestsRead(payload = {}) {
+  const body = typeof payload === 'string' ? { branchId: payload } : payload;
+  return await outstockRequest('medication-requests/mark-read', {
+    method: 'POST',
+    body: JSON.stringify(body)
+  });
+}
+
+export async function outstockMarkMedicationRequestRead(id) {
+  return await outstockRequest(`medication-requests/${id}/mark-read`, {
+    method: 'POST'
   });
 }
 

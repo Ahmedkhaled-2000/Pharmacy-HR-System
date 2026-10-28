@@ -98,6 +98,20 @@ export default function UnifiedWorkspaceSwitcherModal({
     });
   }
 
+  // 6. منظومة إدارة المخازن المركزية والفروع (PharmaOS Stock)
+  if (perms.stockManagement?.enabled !== false && (perms.topManagement?.enabled || perms.outstockHandling?.enabled || perms.stockManagement?.enabled)) {
+    availableWorkspaces.push({
+      id: 'stock',
+      title: 'إدارة المخازن المركزية (PharmaOS Stock)',
+      icon: '📦',
+      badge: 'المخازن وسلاسل الإمداد',
+      desc: 'إدارة المخزن الرئيسي، تحويلات الفروع، استلام المشتريات، متابعة الصلاحية FEFO، والجرد الدوري.',
+      gradient: 'linear-gradient(135deg, #0284c7 0%, #0369a1 100%)',
+      lightBg: 'rgba(2, 132, 199, 0.08)',
+      borderColor: 'rgba(2, 132, 199, 0.3)'
+    });
+  }
+
   return (
     <div style={{
       position: 'fixed',

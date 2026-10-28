@@ -88,6 +88,7 @@ export default function ProcurementOrdersTab({ showToast, categoryScope = null, 
 
   // قرارات الشراء المعلقة قبل الإرسال (Staged Decisions)
   const [decisions, setDecisions] = useState({});
+  const [individualDecisions, setIndividualDecisions] = useState({}); // { [itemId]: 'available' | 'in_preparation' }
 
   // حالة نافذة التأكيد المنبثقة الاحترافية
   const [confirmConfig, setConfirmConfig] = useState({
@@ -646,6 +647,81 @@ export default function ProcurementOrdersTab({ showToast, categoryScope = null, 
           }
         } catch (err) {
           showToast?.('حدث خطأ أثناء إرسال الدفعة');
+        } finally {
+          setIsProcessing(false);
+          setConfirmConfig(prev => ({ ...prev, isOpen: false }));
+        }
+      }
+    });
+  };
+
+  // ⚡ تفعيل / إلغاء تحديد قرار فردي (متوفر أو قيد التجهيز) في وضع عرض كل طلب بسطر مستقل
+  const handleToggleIndividualDecision = (order, action) => {
+    if (!canChangeStatus) {
+      showToast?.('⛔ ليس لديك صلاحية اعتماد وتعديل حالة الطلبات');
+      return;
+    }
+    const key = order.itemId;
+    setIndividualDecisions(prev => {
+      const current = prev[key];
+      const next = current === action ? undefined : action;
+      return { ...prev, [key]: next };
+    });
+  };
+
+  // 🚀 إرسال وتطبيق القرارات الفردية المحددة دفعة واحدة (Bulk Action in Individual View)
+  const handleIndividualBatchSubmit = async () => {
+    if (!canChangeStatus) {
+      showToast?.('⛔ ليس لديك صلاحية اعتماد قرارات المشتريات');
+      return;
+    }
+    const keys = Object.keys(individualDecisions).filter(k => individualDecisions[k]);
+    if (keys.length === 0) {
+      showToast?.('يرجى الضغط على زر (متوفر) أو (قيد التجهيز) لصنف واحد على الأقل أولاً');
+      return;
+    }
+
+    setConfirmConfig({
+      isOpen: true,
+      title: 'إرسال وتطبيق قرارات المشتريات دفعة واحدة',
+      message: `هل تريد اعتماد وإرسال (${keys.length}) قرار دفعة واحدة للفروع المعنية ومزامنة أرصدة الفروع وتنبيهات المرضى فورياً؟`,
+      iconType: 'send',
+      confirmText: `اعتماد وإرسال (${keys.length}) قرار الآن`,
+      cancelText: 'مراجعة',
+      confirmBtnStyle: 'primary',
+      badge: `${keys.length} صنف محدد`,
+      details: [
+        { label: 'إجمالي القرارات المحددة', value: `${keys.length} صنف` },
+        { label: 'المزامنة', value: 'تحديث فوري لرصيد الفروع مع إشعارات واتساب مجمعة' }
+      ],
+      onConfirmAction: async () => {
+        setIsProcessing(true);
+        try {
+          const actions = [];
+          keys.forEach(k => {
+            const ord = individualOrders.find(o => String(o.itemId) === String(k));
+            const act = individualDecisions[k];
+            if (ord && act) {
+              actions.push({
+                branchId: ord.branchId,
+                medicationName: ord.medicationName,
+                unitType: ord.unitType,
+                action: act,
+                itemIds: [ord.itemId]
+              });
+            }
+          });
+
+          const res = await outstockProcurementBatchItemActions(actions);
+          if (res?.success) {
+            showToast?.(`✅ ${res.message || `تم إرسال وتطبيق (${actions.length}) قرار بنجاح ومزامنتها مع الفروع فورياً`}`);
+            setIndividualDecisions({});
+            fetchAggregatedOrders();
+          } else {
+            showToast?.(`⚠️ ${res?.error || 'حدث خطأ أثناء إرسال الدفعة'}`);
+          }
+        } catch (err) {
+          showToast?.(`❌ خطأ: ${err.message || 'حدث خطأ أثناء إرسال الدفعة'}`);
         } finally {
           setIsProcessing(false);
           setConfirmConfig(prev => ({ ...prev, isOpen: false }));
@@ -1256,6 +1332,74 @@ export default function ProcurementOrdersTab({ showToast, categoryScope = null, 
             </div>
           </div>
 
+          {/* ⚡ شريط الإجراءات المجمعة الذكي لطلبات الفروع الفردية (يظهر عند الضغط على متوفر أو قيد التجهيز) */}
+          {(() => {
+            const stagedKeys = Object.keys(individualDecisions).filter(k => individualDecisions[k]);
+            const sCount = stagedKeys.length;
+            if (sCount === 0) return null;
+            const sAvailCount = stagedKeys.filter(k => individualDecisions[k] === 'available').length;
+            const sPrepCount = stagedKeys.filter(k => individualDecisions[k] === 'in_preparation').length;
+
+            return (
+              <div className="outstock-individual-batch-bar" style={{ margin: '10px 14px 14px' }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '10px', flexWrap: 'wrap' }}>
+                  <Sparkles size={18} color="#38bdf8" />
+                  <span style={{ fontWeight: '800', fontSize: '13.5px' }}>
+                    تم تحديد ({sCount}) قرار معلق للإرسال:
+                  </span>
+                  {sAvailCount > 0 && (
+                    <span style={{ background: '#059669', color: '#fff', padding: '2px 8px', borderRadius: '6px', fontSize: '11.5px', fontWeight: '800' }}>
+                      {sAvailCount} متوفر ✅
+                    </span>
+                  )}
+                  {sPrepCount > 0 && (
+                    <span style={{ background: '#0284c7', color: '#fff', padding: '2px 8px', borderRadius: '6px', fontSize: '11.5px', fontWeight: '800' }}>
+                      {sPrepCount} قيد التجهيز 🚚
+                    </span>
+                  )}
+                </div>
+
+                <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
+                  <button
+                    type="button"
+                    onClick={() => setIndividualDecisions({})}
+                    className="outstock-btn"
+                    style={{
+                      background: 'rgba(255,255,255,0.14)',
+                      color: '#ffffff',
+                      border: '1px solid rgba(255,255,255,0.25)',
+                      padding: '6px 12px',
+                      fontSize: '12px',
+                      fontWeight: '700'
+                    }}
+                  >
+                    <X size={13} />
+                    <span>تفريغ التحديد</span>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={handleIndividualBatchSubmit}
+                    disabled={isProcessing}
+                    className="outstock-btn"
+                    style={{
+                      background: 'linear-gradient(135deg, #059669 0%, #047857 100%)',
+                      color: '#ffffff',
+                      border: 'none',
+                      padding: '7px 18px',
+                      fontSize: '13px',
+                      fontWeight: '800',
+                      boxShadow: '0 4px 12px rgba(5, 150, 105, 0.4)'
+                    }}
+                  >
+                    <Send size={14} />
+                    <span>إرسال وتطبيق القرارات ({sCount}) دفعة واحدة 🚀</span>
+                  </button>
+                </div>
+              </div>
+            );
+          })()}
+
           {isLoading ? (
             <div style={{ textAlign: 'center', padding: '40px', color: '#64748b' }}>
               <Loader2 size={32} className="spinner" style={{ margin: '0 auto 10px', color: '#0d9488' }} />
@@ -1536,68 +1680,78 @@ export default function ProcurementOrdersTab({ showToast, categoryScope = null, 
 
                         {/* 9. القرار السريع الفردي لكل بند */}
                         <td>
-                          <div style={{ display: 'flex', alignItems: 'center', gap: '6px', flexWrap: 'wrap' }}>
-                            {/* زر متوفر */}
-                            <button
-                              type="button"
-                              className="outstock-btn outstock-btn-secondary"
-                              onClick={() => handleQuickOrderAction(order, 'available')}
-                              disabled={!canChangeStatus || isProcessing}
-                              style={{
-                                padding: '5px 9px',
-                                fontSize: '11.5px',
-                                fontWeight: '800',
-                                borderColor: '#86efac',
-                                color: '#15803d',
-                                background: '#f0fdf4'
-                              }}
-                              title="توفير الصنف وشحنه فورياً لرصيد الفرع"
-                            >
-                              <CheckCircle2 size={13} />
-                              <span>متوفر</span>
-                            </button>
+                          {(() => {
+                            const stagedAction = individualDecisions[order.itemId];
+                            const isStagedAvail = stagedAction === 'available';
+                            const isStagedPrep = stagedAction === 'in_preparation';
 
-                            {/* زر قيد التجهيز */}
-                            <button
-                              type="button"
-                              className="outstock-btn outstock-btn-secondary"
-                              onClick={() => handleQuickOrderAction(order, 'in_preparation')}
-                              disabled={!canChangeStatus || isProcessing}
-                              style={{
-                                padding: '5px 9px',
-                                fontSize: '11.5px',
-                                fontWeight: '800',
-                                borderColor: '#7dd3fc',
-                                color: '#0369a1',
-                                background: '#f0f9ff'
-                              }}
-                              title="وضع الطلب قيد التجهيز والشحن مع قفل التسليم على الفرع"
-                            >
-                              <Truck size={13} />
-                              <span>قيد التجهيز 🚚</span>
-                            </button>
+                            return (
+                              <div style={{ display: 'flex', alignItems: 'center', gap: '6px', flexWrap: 'wrap' }}>
+                                {/* زر متوفر (تحديد مجمع بنقرة واحدة) */}
+                                <button
+                                  type="button"
+                                  className={`outstock-btn ${isStagedAvail ? 'outstock-btn-staged-available' : 'outstock-btn-secondary'}`}
+                                  onClick={() => handleToggleIndividualDecision(order, 'available')}
+                                  disabled={!canChangeStatus || isProcessing}
+                                  style={{
+                                    padding: '5px 9px',
+                                    fontSize: '11.5px',
+                                    fontWeight: '800',
+                                    ...(isStagedAvail ? {} : {
+                                      borderColor: '#86efac',
+                                      color: '#15803d',
+                                      background: '#f0fdf4'
+                                    })
+                                  }}
+                                  title={isStagedAvail ? "انقر لإلغاء التحديد" : "تحديد الصنف كـ متوفر لإرساله ضمن الدفعة المجمعة"}
+                                >
+                                  <CheckCircle2 size={13} />
+                                  <span>{isStagedAvail ? 'متوفر (محدد ✓)' : 'متوفر'}</span>
+                                </button>
 
-                            {/* زر غير متوفر */}
-                            <button
-                              type="button"
-                              className="outstock-btn outstock-btn-secondary"
-                              onClick={() => handleQuickOrderAction(order, 'unavailable')}
-                              disabled={!canChangeStatus || isProcessing}
-                              style={{
-                                padding: '5px 9px',
-                                fontSize: '11.5px',
-                                fontWeight: '800',
-                                borderColor: '#fca5a5',
-                                color: '#b91c1c',
-                                background: '#fef2f2'
-                              }}
-                              title="شطب الصنف وتحديد السبب واقتراح البدائل الذكية"
-                            >
-                              <XCircle size={13} />
-                              <span>غير متوفر</span>
-                            </button>
+                                {/* زر قيد التجهيز (تحديد مجمع بنقرة واحدة) */}
+                                <button
+                                  type="button"
+                                  className={`outstock-btn ${isStagedPrep ? 'outstock-btn-staged-prep' : 'outstock-btn-secondary'}`}
+                                  onClick={() => handleToggleIndividualDecision(order, 'in_preparation')}
+                                  disabled={!canChangeStatus || isProcessing}
+                                  style={{
+                                    padding: '5px 9px',
+                                    fontSize: '11.5px',
+                                    fontWeight: '800',
+                                    ...(isStagedPrep ? {} : {
+                                      borderColor: '#7dd3fc',
+                                      color: '#0369a1',
+                                      background: '#f0f9ff'
+                                    })
+                                  }}
+                                  title={isStagedPrep ? "انقر لإلغاء التحديد" : "تحديد الصنف كـ قيد التجهيز والشحن لإرساله ضمن الدفعة"}
+                                >
+                                  <Truck size={13} />
+                                  <span>{isStagedPrep ? 'قيد التجهيز (محدد ✓)' : 'قيد التجهيز 🚚'}</span>
+                                </button>
 
-                            {/* زر تعديل الكمية */}
+                                {/* زر غير متوفر */}
+                                <button
+                                  type="button"
+                                  className="outstock-btn outstock-btn-secondary"
+                                  onClick={() => handleQuickOrderAction(order, 'unavailable')}
+                                  disabled={!canChangeStatus || isProcessing}
+                                  style={{
+                                    padding: '5px 9px',
+                                    fontSize: '11.5px',
+                                    fontWeight: '800',
+                                    borderColor: '#fca5a5',
+                                    color: '#b91c1c',
+                                    background: '#fef2f2'
+                                  }}
+                                  title="شطب الصنف وتحديد السبب واقتراح البدائل الذكية"
+                                >
+                                  <XCircle size={13} />
+                                  <span>غير متوفر</span>
+                                </button>
+
+                                {/* زر تعديل الكمية */}
                             <button
                               type="button"
                               className="outstock-btn outstock-btn-secondary"
@@ -1633,7 +1787,9 @@ export default function ProcurementOrdersTab({ showToast, categoryScope = null, 
                               {order.itemType === 'cosmetics' ? <Pill size={13} /> : <Sparkles size={13} />}
                             </button>
                           </div>
-                        </td>
+                        );
+                      })()}
+                    </td>
                       </tr>
                     );
                   })}

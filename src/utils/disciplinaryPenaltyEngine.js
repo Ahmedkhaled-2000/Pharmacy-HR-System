@@ -586,6 +586,8 @@ export function isEmployeeInBranch(emp, branchIdentifiers) {
   // 4. Multi-branch assignments (branchesDetails)
   if (Array.isArray(emp.branchesDetails)) {
     return emp.branchesDetails.some((bd) => {
+      if (!bd) return false;
+      if (bd.isResigned || bd.resigned || bd.status === 'resigned' || bd.status === 'cycle_terminated' || bd.status === 'terminated' || bd.isTerminatedInCycle) return false;
       if (bd.branchId && ids.has(String(bd.branchId))) return true;
       if (bd.branchCode && (codes.has(String(bd.branchCode)) || ids.has(String(bd.branchCode)))) return true;
       if (bd.branchId && codes.has(String(bd.branchId))) return true;

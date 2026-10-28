@@ -1068,24 +1068,230 @@
 /* ── 14. بطاقات الطلبات وقوائم الفروع (Mobile-Friendly Order Cards) ── */
 .outstock-order-card {
   background: var(--surface, #ffffff);
-  border: 1.5px solid var(--border-subtle, #e2e8f0);
-  border-radius: 16px;
+  border: 1px solid #e2e8f0;
+  border-radius: 14px;
   padding: 16px;
   display: flex;
   flex-direction: column;
   gap: 12px;
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.02);
-  transition: all 0.2s ease;
+  box-shadow: 0 1px 4px rgba(15, 23, 42, 0.04);
+  transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+  position: relative;
+}
+
+.outstock-order-card:hover {
+  box-shadow: 0 6px 18px -4px rgba(15, 23, 42, 0.07);
 }
 
 .outstock-order-card.ready-state {
   border-color: #86efac;
-  box-shadow: 0 4px 16px rgba(34, 197, 94, 0.08);
+  background: #fcfdfc;
+  box-shadow: 0 2px 10px rgba(16, 185, 129, 0.06);
+}
+
+.outstock-order-card.unavailable-state {
+  border-color: #fca5a5;
+  background: #fffafa;
+}
+
+.outstock-order-card.partial-state {
+  border-color: #93c5fd;
+  background: #fafcff;
+}
+
+/* جدول الأصناف المطلوبة وتصنيفها المطور */
+.outstock-items-table-container {
+  width: 100%;
+  overflow-x: auto;
+  border-radius: 10px;
+  border: 1px solid #e2e8f0;
+  background: #ffffff;
+  margin-top: 4px;
+}
+
+.outstock-items-table {
+  width: 100%;
+  border-collapse: separate;
+  border-spacing: 0;
+  text-align: right;
+  font-size: 12.5px;
+  font-family: inherit;
+  min-width: 680px;
+}
+
+.outstock-items-table thead th {
+  background: #f8fafc;
+  color: #475569;
+  font-size: 11.5px;
+  font-weight: 700;
+  padding: 8px 10px;
+  border-bottom: 1px solid #e2e8f0;
+  white-space: nowrap;
+}
+
+.outstock-items-table tbody td {
+  padding: 8px 10px;
+  border-bottom: 1px solid #f1f5f9;
+  color: #1e293b;
+  vertical-align: middle;
+}
+
+.outstock-items-table tbody tr:last-child td {
+  border-bottom: none;
+}
+
+.outstock-items-table tbody tr:hover td {
+  background: #f8fafc;
+}
+
+.outstock-items-table tbody tr.is-unavailable td {
+  background: #fff8f8;
+}
+
+.outstock-items-table tbody tr.is-delivered td {
+  background: #f6fdf8;
+}
+
+/* شارات أزرار القرارات الفردية المحددة قبل الإرسال (Staged Decision States) */
+.outstock-btn-staged-available {
+  background: #059669 !important;
+  color: #ffffff !important;
+  border-color: #047857 !important;
+  font-weight: 800 !important;
+  box-shadow: 0 2px 6px rgba(5, 150, 105, 0.35) !important;
+}
+
+.outstock-btn-staged-prep {
+  background: #0284c7 !important;
+  color: #ffffff !important;
+  border-color: #0369a1 !important;
+  font-weight: 800 !important;
+  box-shadow: 0 2px 6px rgba(2, 132, 199, 0.35) !important;
+}
+
+/* شريط الإجراءات المجمعة الذكي في شاشة المشتريات */
+.outstock-individual-batch-bar {
+  position: sticky;
+  top: 68px;
+  z-index: 100;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 10px 16px;
+  background: rgba(15, 23, 42, 0.94);
+  color: #ffffff;
+  border-radius: 12px;
+  margin-bottom: 14px;
+  box-shadow: 0 10px 25px -5px rgba(15, 23, 42, 0.3);
+  backdrop-filter: blur(8px);
+  animation: modalSlideIn 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+/* قائمة الإجراءات الثانوية المنسدلة (Dropdown Menu) */
+.outstock-dropdown-container {
+  position: relative;
+  display: inline-block;
+}
+
+.outstock-dropdown-menu {
+  position: absolute;
+  left: 0;
+  bottom: calc(100% + 6px);
+  min-width: 210px;
+  background: #ffffff;
+  border: 1px solid #e2e8f0;
+  border-radius: 12px;
+  box-shadow: 0 12px 30px rgba(15, 23, 42, 0.15);
+  padding: 6px;
+  z-index: 500;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  animation: modalSlideIn 0.15s ease-out;
+}
+
+.outstock-dropdown-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
+  border-radius: 8px;
+  border: none;
+  background: transparent;
+  color: #334155;
+  font-size: 12.5px;
+  font-weight: 700;
+  cursor: pointer;
+  width: 100%;
+  text-align: right;
+  transition: all 0.12s ease;
+}
+
+.outstock-dropdown-item:hover {
+  background: #f1f5f9;
+  color: #0f172a;
+}
+
+.outstock-dropdown-item.danger {
+  color: #dc2626;
+}
+
+.outstock-dropdown-item.danger:hover {
+  background: #fef2f2;
+}
+
+/* شبكة وجدول مقارنة بنود التصحيح (Diff View) */
+.outstock-diff-table {
+  width: 100%;
+  border-collapse: separate;
+  border-spacing: 0;
+  font-size: 12.5px;
+  border-radius: 10px;
+  border: 1px solid #e2e8f0;
+  overflow: hidden;
+}
+
+.outstock-diff-table th {
+  background: #f8fafc;
+  color: #475569;
+  font-size: 11.5px;
+  font-weight: 700;
+  padding: 8px 12px;
+  border-bottom: 1px solid #e2e8f0;
+}
+
+.outstock-diff-table td {
+  padding: 9px 12px;
+  border-bottom: 1px solid #f1f5f9;
+  vertical-align: middle;
+}
+
+.outstock-diff-old-val {
+  background: #f8fafc;
+  color: #64748b;
+  font-family: var(--outstock-font-mono, monospace);
+  padding: 3px 8px;
+  border-radius: 6px;
+  border: 1px solid #e2e8f0;
+  font-size: 12px;
+}
+
+.outstock-diff-new-val {
+  background: #eff6ff;
+  color: #1d4ed8;
+  font-family: var(--outstock-font-mono, monospace);
+  padding: 3px 8px;
+  border-radius: 6px;
+  border: 1px solid #bfdbfe;
+  font-size: 12px;
+  font-weight: 700;
 }
 
 .outstock-order-actions-bar {
   display: flex;
   align-items: center;
+  justify-content: space-between;
   gap: 8px;
   flex-wrap: wrap;
 }

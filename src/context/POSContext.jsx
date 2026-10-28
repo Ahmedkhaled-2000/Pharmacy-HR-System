@@ -10,6 +10,7 @@ import {
 import { commitLocalSale, getLocalOutbox } from '../utils/posOfflineSync';
 import { printPosSaleReceipt } from '../utils/posPrintService';
 import { playBarcodeSuccessBeep, playCashRegisterChime, playWarningAlertSound } from '../utils/posAudioService';
+import { deductCustomerWallet } from '../services/posCustomerService';
 import { useAuth } from './AuthContext';
 import { useData } from './DataContext';
 
@@ -57,6 +58,11 @@ export function POSProvider({ children }) {
       startTime: new Date().toISOString(),
       openingCash: 500.00,
       totalSalesAmount: 0,
+      cashSalesAmount: 0,
+      visaSalesAmount: 0,
+      walletSalesAmount: 0,
+      otherSalesAmount: 0,
+      cashRefunds: 0,
       salesCount: 0,
       status: 'open'
     };
@@ -74,30 +80,15 @@ export function POSProvider({ children }) {
       const saved = localStorage.getItem('pharma_pos_open_windows');
       if (saved) {
         const parsed = JSON.parse(saved);
-        if (Array.isArray(parsed) && parsed.length > 0) return parsed;
+        if (Array.isArray(parsed)) return parsed;
       }
     } catch {}
-    // نافذة البيع الافتراضية الأولى
-    return [
-      {
-        id: 'win-1',
-        title: 'شاشة بيع رئيسية #1',
-        invoiceType: 'otc', // 'otc' | 'rx' | 'customer_order' | 'delivery'
-        rxImage: null,
-        deliveryDetails: { isDelivery: false, address: '', pilotName: '', deliveryFee: 0 },
-        cart: [],
-        customer: { name: '', phone: '', isChronic: false, walletBalance: 0 },
-        position: { x: 30, y: 30 },
-        size: { width: 920, height: 600 },
-        isMinimized: false,
-        isMaximized: false,
-        zIndex: 10
-      }
-    ];
+    // بدء النظام بدون فتح أي نافذة بيع إجبارياً
+    return [];
   });
 
-  const [activeWindowId, setActiveWindowId] = useState('win-1');
-  const maxZIndexRef = useRef(15);
+  const [activeWindowId, setActiveWindowId] = useState(null);
+  const maxZIndexRef = useRef(150);
 
   useEffect(() => {
     try {
@@ -137,12 +128,20 @@ export function POSProvider({ children }) {
     maxZIndexRef.current += 1;
     const newId = `win-${Date.now()}`;
     const windowNumber = salesWindows.length + 1;
-    const defaultTitle = customTitle || `شاشة بيع منبثقة #${windowNumber}`;
+    const defaultTitle = customTitle || `شاشة بيع #${windowNumber}`;
 
-    // إزاحة موضع النافذة الجديدة قليلاً لتكون مكدسة بشكل جذاب (Cascading layout)
-    const offset = (salesWindows.length % 5) * 28;
-    const newX = Math.min(window.innerWidth - 600, 40 + offset);
-    const newY = Math.min(window.innerHeight - 500, 40 + offset);
+    // حساب أبعاد متناسبة ومريحة تتسع لكامل عناصر النافذة وتملأ الشاشة بدقة
+    const optimalW = typeof window !== 'undefined'
+      ? Math.max(1050, Math.min(1380, window.innerWidth - 380))
+      : 1180;
+    const optimalH = typeof window !== 'undefined'
+      ? Math.max(680, Math.min(880, window.innerHeight - 80))
+      : 760;
+
+    // موضع النافذة الافتراضي
+    const offset = salesWindows.length === 0 ? 0 : (salesWindows.length % 5) * 20;
+    const newX = 16 + offset;
+    const newY = 12 + offset;
 
     const newWindow = {
       id: newId,
@@ -153,7 +152,7 @@ export function POSProvider({ children }) {
       cart: [],
       customer: { name: '', phone: '', isChronic: false, walletBalance: 0 },
       position: { x: newX, y: newY },
-      size: { width: 920, height: 600 },
+      size: { width: optimalW, height: optimalH },
       isMinimized: false,
       isMaximized: false,
       zIndex: maxZIndexRef.current
@@ -163,16 +162,6 @@ export function POSProvider({ children }) {
     setActiveWindowId(newId);
     return newId;
   }, [salesWindows]);
-
-  // ── ضمان وجود شاشة بيع مفتوحة ونشطة دائماً لتفادي الشاشة الفارغة ──
-  useEffect(() => {
-    if (salesWindows.length === 0) {
-      const timer = setTimeout(() => {
-        openNewSalesWindow('شاشة البيع الرئيسية #1');
-      }, 50);
-      return () => clearTimeout(timer);
-    }
-  }, [salesWindows.length, openNewSalesWindow]);
 
   // إغلاق نافذة بيع (مع السماح بإغلاق كافة النوافذ بحرية تامة دون إجبار)
   const closeSalesWindow = useCallback((windowId) => {
@@ -333,7 +322,24 @@ export function POSProvider({ children }) {
         if (!targetItem) return win;
 
         const product = productsCatalog.find((p) => p.id === targetItem.productId);
-        if (!product) return win;
+        if (!product) {
+          // دعم مرن للأصناف غير المكودة أو الأصناف المحملة خارج الكتالوج العام
+          const unitPrice = parseFloat(targetItem.unitPrice || targetItem.price || 0);
+          const lineSubtotal = parseFloat((unitPrice * newQty).toFixed(2));
+          const discountPct = parseFloat(targetItem.discountPct || 0);
+          const lineTotal = parseFloat((lineSubtotal * (1 - discountPct / 100)).toFixed(2));
+
+          const updatedLine = {
+            ...targetItem,
+            quantity: newQty,
+            lineSubtotal,
+            lineTotal
+          };
+
+          const newCart = [...win.cart];
+          newCart[itemIndex] = updatedLine;
+          return { ...win, cart: newCart };
+        }
 
         const updatedLine = calculateCartItemLine(
           product,
@@ -358,7 +364,29 @@ export function POSProvider({ children }) {
         if (!targetItem) return win;
 
         const product = productsCatalog.find((p) => p.id === targetItem.productId);
-        if (!product) return win;
+        if (!product) {
+          if (targetItem.subUnitsCount > 1) {
+            const nextUnit = targetItem.unitType === 'base' ? 'sub' : 'base';
+            const unitPrice = nextUnit === 'sub'
+              ? parseFloat(((targetItem.basePrice || targetItem.unitPrice) / targetItem.subUnitsCount).toFixed(2))
+              : (targetItem.basePrice || targetItem.unitPrice);
+            const lineSubtotal = parseFloat((unitPrice * targetItem.quantity).toFixed(2));
+            const lineTotal = parseFloat((lineSubtotal * (1 - (targetItem.discountPct || 0) / 100)).toFixed(2));
+
+            const updatedLine = {
+              ...targetItem,
+              unitType: nextUnit,
+              unitName: nextUnit === 'sub' ? 'شريط' : 'علبة',
+              unitPrice,
+              lineSubtotal,
+              lineTotal
+            };
+            const newCart = [...win.cart];
+            newCart[itemIndex] = updatedLine;
+            return { ...win, cart: newCart };
+          }
+          return win;
+        }
 
         // الدورة: علبة -> شريط -> قرص (إن وجد) -> علبة
         let nextUnit = 'base';
@@ -469,20 +497,54 @@ export function POSProvider({ children }) {
     paymentMethod = 'cash',
     paidAmount = null,
     discountAmount = 0,
+    walletDeducted = 0,
     cashierEmpCode = null,
     cashierEmpName = null,
     cashierEmpId = null,
-    printReceipt = true
+    printReceipt = true,
+    splitPayments = null,
+    telecomDetails = null
   }) => {
     const targetWindow = salesWindows.find((w) => w.id === windowId);
     if (!targetWindow || targetWindow.cart.length === 0) return null;
 
     const subtotal = targetWindow.cart.reduce((sum, it) => sum + (it.lineTotal || 0), 0);
     const finalDiscount = Math.min(subtotal, parseFloat(discountAmount) || 0);
-    const netTotal = Math.max(0, subtotal - finalDiscount);
+
+    // احتساب رسوم خدمة التوصيل بدقة
+    const isDelivery = targetWindow.invoiceType === 'delivery' || Boolean(targetWindow.deliveryDetails?.isDelivery);
+    const deliveryFee = isDelivery ? (parseFloat(targetWindow.deliveryDetails?.deliveryFee) || 0) : 0;
+
+    const remainingBeforeWallet = Math.max(0, parseFloat((subtotal - finalDiscount + deliveryFee).toFixed(2)));
+    const finalWalletDeducted = Math.min(remainingBeforeWallet, parseFloat(walletDeducted) || 0);
+    const netTotal = Math.max(0, parseFloat((remainingBeforeWallet - finalWalletDeducted).toFixed(2)));
     const finalPaid = paidAmount !== null ? parseFloat(paidAmount) : netTotal;
 
     const totalCommissions = targetWindow.cart.reduce((sum, it) => sum + (it.instantCommission || 0), 0);
+
+    const nextInvoiceSeq = (currentShift?.salesCount || 0) + 1;
+    const sequentialInvoiceNumber = String(nextInvoiceSeq);
+
+    // تفصيل طرق السداد والنقدية لدرج الكاشير
+    let tenderCash = 0;
+    let tenderVisa = 0;
+    let tenderWallet = finalWalletDeducted;
+    let tenderOther = 0;
+
+    if (paymentMethod === 'cash') {
+      tenderCash = netTotal;
+    } else if (paymentMethod === 'visa' || paymentMethod === 'card') {
+      tenderVisa = netTotal;
+    } else if (paymentMethod === 'customer_wallet' || paymentMethod === 'wallet' || paymentMethod === 'telecom_wallet') {
+      tenderWallet += netTotal;
+    } else if (paymentMethod === 'split' && splitPayments) {
+      tenderCash = parseFloat(splitPayments.cash || 0);
+      tenderVisa = parseFloat(splitPayments.visa || 0);
+      tenderWallet += parseFloat(splitPayments.wallet || 0);
+      tenderOther = parseFloat(splitPayments.other || 0);
+    } else {
+      tenderCash = netTotal;
+    }
 
     const salePayload = {
       branchId: currentBranch?.id || 'main',
@@ -491,19 +553,32 @@ export function POSProvider({ children }) {
       cashierName: cashierEmpName || currentEmpUser?.name || 'صيدلي الكاشير',
       cashierEmpCode: cashierEmpCode || currentEmpUser?.code || '101',
       shiftId: currentShift.id,
+      invoiceNumber: sequentialInvoiceNumber,
+      sequenceNumber: nextInvoiceSeq,
       invoiceType: targetWindow.invoiceType || 'otc', // 'otc' | 'rx' | 'customer_order' | 'delivery'
       rxImage: targetWindow.rxImage || null,
       deliveryDetails: targetWindow.deliveryDetails || null,
+      deliveryFee,
       deliveryStatus: targetWindow.invoiceType === 'delivery' ? 'pending' : null,
       items: targetWindow.cart,
       subtotal,
       discountAmount: finalDiscount,
+      walletDeducted: finalWalletDeducted,
       totalAmount: netTotal,
       paidAmount: finalPaid,
-      remainingAmount: Math.max(0, finalPaid - netTotal),
+      remainingAmount: Math.max(0, parseFloat((finalPaid - netTotal).toFixed(2))),
       paymentMethod,
+      splitPayments,
+      telecomDetails,
+      tenderBreakdown: {
+        cash: tenderCash,
+        visa: tenderVisa,
+        wallet: tenderWallet,
+        other: tenderOther
+      },
       customerName: targetWindow.customer?.name || '',
       customerPhone: targetWindow.customer?.phone || '',
+      customerId: targetWindow.customer?.id || null,
       isChronic: Boolean(targetWindow.customer?.isChronic),
       totalCommissions
     };
@@ -514,14 +589,35 @@ export function POSProvider({ children }) {
     // تشغيل نغمة فتح الدرج ونجاح إتمام الفاتورة
     playCashRegisterChime();
 
-    // 2. تحديث إحصائيات الوردية الحالية
+    // 2. تحديث إحصائيات الوردية الحالية مع فصل الكاش الفعلي عن الفيزا والمحافظ
     setCurrentShift((prev) => ({
       ...prev,
-      totalSalesAmount: parseFloat(((prev.totalSalesAmount || 0) + netTotal).toFixed(2)),
-      salesCount: (prev.salesCount || 0) + 1
+      totalSalesAmount: parseFloat(((prev?.totalSalesAmount || 0) + (netTotal + finalWalletDeducted)).toFixed(2)),
+      cashSalesAmount: parseFloat(((prev?.cashSalesAmount || 0) + tenderCash).toFixed(2)),
+      visaSalesAmount: parseFloat(((prev?.visaSalesAmount || 0) + tenderVisa).toFixed(2)),
+      walletSalesAmount: parseFloat(((prev?.walletSalesAmount || 0) + tenderWallet).toFixed(2)),
+      otherSalesAmount: parseFloat(((prev?.otherSalesAmount || 0) + tenderOther).toFixed(2)),
+      salesCount: (prev?.salesCount || 0) + 1
     }));
 
-    // 3. ربط العمولة مع الرواتب إذا كان الموظف مسجلاً
+    // 3. خصم رصيد المحفظة الفعلي من حساب العميل مركزياً ومحلياً
+    if (targetWindow.customer?.id && tenderWallet > 0) {
+      try {
+        deductCustomerWallet({
+          customerId: targetWindow.customer.id,
+          amount: tenderWallet,
+          invoiceNumber: sequentialInvoiceNumber,
+          employeeCode: cashierEmpCode || currentEmpUser?.code || '101',
+          employeeName: cashierEmpName || currentEmpUser?.name || 'صيدلي الكاشير',
+          branchId: currentBranch?.id || 'main',
+          branchName: currentBranch?.name || 'الفرع الرئيسي'
+        });
+      } catch (wErr) {
+        console.warn('Customer wallet deduction error:', wErr);
+      }
+    }
+
+    // 4. ربط العمولة مع الرواتب إذا كان الموظف مسجلاً
     if (totalCommissions > 0 && currentEmpUser?.id && setState) {
       setState((prev) => {
         if (!prev) return prev;
@@ -542,12 +638,12 @@ export function POSProvider({ children }) {
       });
     }
 
-    // 4. طباعة الريسيت الحراري التلقائي (إذا لم يتم تخطيه للبيع السريع بدون ريسيت)
+    // 5. طباعة الريسيت الحراري التلقائي (إذا لم يتم تخطيه للبيع السريع بدون ريسيت)
     if (printReceipt !== false) {
       printPosSaleReceipt(committed, currentBranch, currentEmpUser?.name || 'صيدلي الكاشير');
     }
 
-    // 5. إفراغ سلة النافذة بعد نجاح البيع
+    // 6. إفراغ سلة النافذة بعد نجاح البيع
     clearCart(windowId);
 
     return committed;
@@ -582,6 +678,7 @@ export function POSProvider({ children }) {
   const [isOcrModalOpen, setIsOcrModalOpen] = useState(false);
   const [isShortcutsGuideOpen, setIsShortcutsGuideOpen] = useState(false);
   const [isReportsModalOpen, setIsReportsModalOpen] = useState(false);
+  const [reportsActiveTab, setReportsActiveTab] = useState('shifts');
 
   // مودال سجل العميل والمشتريات السابقة والمحفظة (Customer Purchase History & Wallet Modal)
   const [isCustomerHistoryOpen, setIsCustomerHistoryOpen] = useState(false);
@@ -594,6 +691,9 @@ export function POSProvider({ children }) {
 
   // شاشة ورادار المالك لمتابعة كافة الفروع (Owner Multi-Branch POS Hub)
   const [isOwnerHubOpen, setIsOwnerHubOpen] = useState(false);
+
+  // مركز ومودال رسائل الواتساب الفورية لفرع الصيدلية
+  const [isWhatsAppModalOpen, setIsWhatsAppModalOpen] = useState(false);
 
   // إحصائيات المزامنة الحية
   const [pendingSyncCount, setPendingSyncCount] = useState(() => getLocalOutbox().length);
@@ -608,11 +708,14 @@ export function POSProvider({ children }) {
     return () => window.removeEventListener('pos:outbox-updated', handleOutboxUpdate);
   }, []);
 
+  const currentShiftInvoiceSeq = (currentShift?.salesCount || 0) + 1;
+
   const value = {
     productsCatalog,
     setProductsCatalog,
     currentShift,
     setCurrentShift,
+    currentShiftInvoiceSeq,
     salesWindows,
     activeWindowId,
     setActiveWindowId,
@@ -668,12 +771,16 @@ export function POSProvider({ children }) {
     setIsShortcutsGuideOpen,
     isReportsModalOpen,
     setIsReportsModalOpen,
+    reportsActiveTab,
+    setReportsActiveTab,
     isCustomerHistoryOpen,
     setIsCustomerHistoryOpen,
     customerHistoryTarget,
     openCustomerHistoryModal,
     isOwnerHubOpen,
     setIsOwnerHubOpen,
+    isWhatsAppModalOpen,
+    setIsWhatsAppModalOpen,
     pendingSyncCount
   };
 

@@ -77,7 +77,9 @@ export async function getValidAuthToken() {
       try {
         const parts = token.split('.');
         if (parts.length >= 2) {
-          const payload = JSON.parse(atob(parts[0]));
+          const base64 = parts[1].replace(/-/g, '+').replace(/_/g, '/');
+          const jsonPayload = decodeURIComponent(atob(base64).split('').map(c => '%' + ('00' + c.charCodeAt(0).toString(16)).slice(-2)).join(''));
+          const payload = JSON.parse(jsonPayload);
           if (payload && payload.exp && payload.exp * 1000 > Date.now() + 60000) {
             return token;
           }
@@ -512,7 +514,8 @@ export async function apiSaveSettingsSlice(sliceKeyOrSlices, sliceValueOrOptions
     timeout: opts.timeout || 20000,
     retries: opts.retries !== undefined ? opts.retries : 2,
     noCache: true,
-    isBackground: opts.isBackground || false
+    isBackground: opts.isBackground || false,
+    keepalive: opts.keepalive !== undefined ? opts.keepalive : true
   });
 }
 
@@ -522,10 +525,11 @@ export async function apiSubmitRequestDecision(payload, options = {}) {
   return await request('requests/decide', {
     method: 'POST',
     body: JSON.stringify({ key: STORAGE_KEY, ...payload }),
-    timeout: options.timeout || 15000,
-    retries: options.retries !== undefined ? options.retries : 2,
+    timeout: options.timeout || 20000,
+    retries: options.retries !== undefined ? options.retries : 3,
     noCache: true,
-    isBackground: options.isBackground || false
+    isBackground: options.isBackground || false,
+    keepalive: options.keepalive !== undefined ? options.keepalive : true
   });
 }
 

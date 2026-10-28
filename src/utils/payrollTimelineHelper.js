@@ -180,7 +180,9 @@ export function buildEmployeeMonthTimeline({
     // فحص الراحة المجدولة (من الجدول أو الإعدادات أو أيام الراحة المحددة)
     const isScheduledOff = Boolean(
       (daySched && (daySched.type === 'off' || daySched.isOff)) ||
-      (Array.isArray(emp.weeklyRestDays) && emp.weeklyRestDays.some((d) => String(d).trim().replace(/[إأآ]/g, 'ا') === dayName.replace(/[إأآ]/g, 'ا')))
+      (Array.isArray(emp.weeklyRestDays) && emp.weeklyRestDays.some((d) => String(d).trim().replace(/[إأآ]/g, 'ا') === dayName.replace(/[إأآ]/g, 'ا'))) ||
+      (Array.isArray(emp.weekly_off_days) && emp.weekly_off_days.some((d) => String(d).trim().replace(/[إأآ]/g, 'ا') === dayName.replace(/[إأآ]/g, 'ا'))) ||
+      (Array.isArray(emp.offDays) && emp.offDays.some((d) => String(d).trim().replace(/[إأآ]/g, 'ا') === dayName.replace(/[إأآ]/g, 'ا')))
     );
 
     const dayShifts = shiftsByDate.get(dateStr);

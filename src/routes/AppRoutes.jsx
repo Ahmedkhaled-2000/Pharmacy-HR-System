@@ -41,6 +41,7 @@ const DeveloperPortalView = lazy(() => import('../components/developer/Developer
 const CompanyRegisterPage = lazy(() => import('../components/auth/CompanyRegisterPage'));
 const OutstockSystemView = lazy(() => import('../components/outstock/OutstockSystemView'));
 const PosSystemView = lazy(() => import('../components/pos/PosSystemView'));
+const StockSystemView = lazy(() => import('../components/stock/StockSystemView'));
 const OwnerAccessAndIdentityModule = lazy(() => import('../components/permissions/OwnerAccessAndIdentityModule'));
 import OwnerCommandLaunchpadModal from '../components/auth/OwnerCommandLaunchpadModal';
 import UnifiedWorkspaceSwitcherModal from '../components/auth/UnifiedWorkspaceSwitcherModal';
@@ -441,6 +442,35 @@ export default function AppRoutes() {
       targetTab = 'outstock';
     } else if (systemId === 'accounts') {
       targetTab = 'accounts';
+    } else if (systemId === 'stock') {
+      if (isOwnerLoginGateActive && pendingOwnerAuth) {
+        const { cleanPass, dName, org, authResult } = pendingOwnerAuth;
+        const ownerUsername = authResult?.ownerUser?.username || 'saif';
+        try {
+          localStorage.setItem('app_auth_role', 'owner');
+          localStorage.setItem('app_owner_authenticated', 'true');
+          localStorage.setItem('app_owner_display_name', dName);
+          localStorage.setItem('app_owner_password_snapshot', cleanPass);
+          localStorage.setItem('app_owner_username_snapshot', ownerUsername);
+          localStorage.setItem('app_current_owner', JSON.stringify({
+            id: authResult?.ownerUser?.id || `owner_${ownerUsername}`,
+            username: ownerUsername,
+            fullName: dName,
+            name: dName,
+            isOwner: true,
+            password: cleanPass
+          }));
+          const ownerSessionVer = String(authResult?.ownerUser?.sessionVersion !== undefined ? authResult.ownerUser.sessionVersion : (org?.ownerSessionVersion || 1));
+          localStorage.setItem('app_owner_session_version', ownerSessionVer);
+          sessionStorage.setItem('app_owner_authenticated', 'true');
+          sessionStorage.setItem('app_owner_username_snapshot', ownerUsername);
+          sessionStorage.setItem('app_owner_session_version', ownerSessionVer);
+        } catch {}
+        setIsOwnerLoginGateActive(false);
+        setPendingOwnerAuth(null);
+      }
+      window.location.href = '/stock';
+      return;
     } else if (systemId === 'permissions') {
       targetTab = 'owner-permissions';
     }
@@ -527,6 +557,8 @@ export default function AppRoutes() {
       });
     } else if (kind === 'accounts') {
       handleUnifiedLogin({ role: 'admin', user: targetUser, redirectTab: 'accounts' });
+    } else if (kind === 'stock') {
+      window.location.href = '/stock';
     }
   }, [switcherUser, currentEmpUser, state?.branches, handleUnifiedLogin]);
 
@@ -844,6 +876,8 @@ export default function AppRoutes() {
     ? 'kiosk'
     : location.pathname.startsWith('/outstock')
     ? 'outstock'
+    : location.pathname.startsWith('/stock') || authRole === 'stock'
+    ? 'stock'
     : location.pathname.startsWith('/pos') || authRole === 'pos'
     ? 'pos'
     : location.pathname === '/employee'
@@ -1197,6 +1231,22 @@ export default function AppRoutes() {
       const adminUser = cleanStr(org.adminUsername || org.adminUser || 'admin').toLowerCase();
       const adminPass = cleanStr(org.adminPassword || org.adminPass || '123');
 
+      // 0.0 Check Stock Manager 2806
+      if ((cleanUser === '2806' || stdUser === '2806') && isPasswordMatch('2806', cleanPass)) {
+        return {
+          role: 'stock',
+          matched: true,
+          user: {
+            id: 'stock_manager_2806',
+            username: '2806',
+            role: 'stock',
+            name: 'أمين المخازن المعتمد (2806)',
+            fullName: 'أمين المخازن المعتمد (2806)',
+            displayName: 'أمين المخازن المعتمد (2806)'
+          }
+        };
+      }
+
       // 0. Check Developer (يوزر مطور النظام السيادي)
       const isDevUserMatch = cleanUser === 'developer';
       const isDevPassMatch = isPasswordMatch('Dev@Master#2026', cleanPass) ||
@@ -1487,6 +1537,28 @@ export default function AppRoutes() {
               }
             } catch {}
             return { success: true, role: 'pos' };
+          } else if (sRole === 'stock') {
+            authResult = {
+              role: 'stock',
+              matched: true,
+              user: sUser || {
+                id: 'stock_manager_2806',
+                username: '2806',
+                role: 'stock',
+                name: 'أمين المخازن المعتمد (2806)',
+                fullName: 'أمين المخازن المعتمد (2806)'
+              }
+            };
+            handleUnifiedLogin({
+              role: 'stock',
+              user: authResult.user,
+              redirectTab: 'stock'
+            });
+            try {
+              localStorage.setItem('app_auth_role', 'stock');
+              localStorage.setItem('outstock_user', JSON.stringify(authResult.user));
+            } catch {}
+            return { success: true, role: 'stock' };
           } else if (sRole === 'admin') {
             authResult = { role: 'admin', matched: true, org: state?.orgSettings || {} };
           } else if (sRole === 'owner') {
@@ -1700,6 +1772,26 @@ export default function AppRoutes() {
           sessionStorage.removeItem('app_settings_owner_tab_unlocked');
         } catch {}
         return { success: true, role: 'admin' };
+      }
+
+      if (role === 'stock') {
+        const stockUser = authResult.user || {
+          id: 'stock_manager_2806',
+          username: '2806',
+          role: 'stock',
+          name: 'أمين المخازن المعتمد (2806)',
+          fullName: 'أمين المخازن المعتمد (2806)'
+        };
+        handleUnifiedLogin({
+          role: 'stock',
+          user: stockUser,
+          redirectTab: 'stock'
+        });
+        try {
+          localStorage.setItem('app_auth_role', 'stock');
+          localStorage.setItem('outstock_user', JSON.stringify(stockUser));
+        } catch {}
+        return { success: true, role: 'stock' };
       }
 
       if (role === 'branch') {
@@ -2210,8 +2302,24 @@ export default function AppRoutes() {
         </ErrorBoundary>
       )}
 
+      {/* ── PharmaOS Stock Central Warehouse System ── */}
+      {(viewMode === 'stock' || authRole === 'stock') && (
+        <ErrorBoundary fallbackTitle="حدث خطأ في منظومة إدارة المخازن المركزية والفروع (PharmaOS Stock)">
+          <Suspense fallback={<div className="loading-fallback">جاري تحميل منظومة المخازن المركزية (PharmaOS Stock)...</div>}>
+            <StockSystemView
+              currentUser={currentEmpUser || { name: 'مدير المخازن', role: authRole }}
+              currentBranch={currentBranch}
+              onLogout={handleLogout}
+              themeMode={themeMode}
+              toggleTheme={toggleTheme}
+              showToast={showToast}
+            />
+          </Suspense>
+        </ErrorBoundary>
+      )}
+
       {/* ── 2. Authenticated / Unauthenticated App Views ── */}
-      {viewMode !== 'kiosk' && viewMode !== 'archive' && viewMode !== 'accounts' && viewMode !== 'careers' && viewMode !== 'interview' && viewMode !== 'developer' && viewMode !== 'register' && viewMode !== 'outstock' && viewMode !== 'pos' && authRole !== 'developer' && authRole !== 'pos' && !(typeof authRole === 'string' && authRole.startsWith('outstock_')) && (
+      {viewMode !== 'kiosk' && viewMode !== 'archive' && viewMode !== 'accounts' && viewMode !== 'careers' && viewMode !== 'interview' && viewMode !== 'developer' && viewMode !== 'register' && viewMode !== 'outstock' && viewMode !== 'stock' && viewMode !== 'pos' && authRole !== 'developer' && authRole !== 'pos' && !(typeof authRole === 'string' && authRole.startsWith('outstock_')) && (
         (!isAdminLoggedIn && !currentEmpUser && !currentBranch) || authRole === 'none' ? (
           <ErrorBoundary fallbackTitle="حدث خطأ في شاشة تسجيل الدخول">
             <LoginPage
