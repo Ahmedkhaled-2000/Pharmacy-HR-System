@@ -22,9 +22,9 @@ if errorlevel 1 (
     exit /b 1
 )
 
-echo [3/3] Copying APK to destinations...
+echo [3/3] Deploying APK to destinations...
 cd /d "%~dp0"
-node -e "const fs = require('fs'); const path = require('path'); const os = require('os'); const src = path.join(__dirname, 'pharma_employee_app/build/app/outputs/flutter-apk/app-release.apk'); if (!fs.existsSync(src)) { console.error('APK not found at:', src); process.exit(1); } const dests = [path.join(__dirname, 'pharma_employee_app.apk'), path.join(__dirname, 'بوابة_الموظف_flutter.apk'), path.join(os.homedir(), 'Desktop', 'pharma_employee_app.apk'), path.join(os.homedir(), 'Desktop', 'بوابة_الموظف_flutter.apk')]; dests.forEach(d => { fs.copyFileSync(src, d); console.log('Successfully copied to:', d, '(' + Math.round(fs.statSync(d).size / (1024 * 1024) * 10) / 10 + ' MB)'); });"
+call node scripts\deploy_apk.cjs
 
 echo.
 echo ===================================================
