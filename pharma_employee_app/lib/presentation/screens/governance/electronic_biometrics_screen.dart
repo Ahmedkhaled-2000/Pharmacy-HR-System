@@ -1,3 +1,5 @@
+import 'dart:io';
+import 'dart:typed_data';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
@@ -35,16 +37,44 @@ class _ElectronicBiometricsScreenState
     );
 
     if (result != null && result.success && result.descriptor != null) {
-      await _sendRegistrationRequest(result.descriptor!);
+      await _sendRegistrationRequest(
+        descriptor: result.descriptor!,
+        imageBytes: result.capturedImageBytes,
+        photoPath: result.capturedPhotoPath,
+      );
     }
   }
 
-  Future<void> _sendRegistrationRequest(String descriptor) async {
+  Future<void> _sendRegistrationRequest({
+    required String descriptor,
+    Uint8List? imageBytes,
+    String? photoPath,
+  }) async {
     setState(() => _isSubmitting = true);
     final user = ref.read(authProvider).user;
     if (user == null) return;
 
     final repo = ref.read(employeeRepositoryProvider);
+
+    // رفع لقطة صورة الوجه الحقيقية إلى السيرفر لتظهر في طلب الاعتماد للإدارة العليا
+    String? uploadedPhotoUrl;
+    try {
+      Uint8List? finalBytes = imageBytes;
+      if (finalBytes == null && photoPath != null && photoPath.isNotEmpty) {
+        final f = File(photoPath);
+        if (await f.exists()) {
+          finalBytes = await f.readAsBytes();
+        }
+      }
+      if (finalBytes != null && finalBytes.isNotEmpty) {
+        uploadedPhotoUrl = await repo.uploadAttendancePhoto(
+          user: user,
+          imageBytes: finalBytes,
+        );
+      }
+    } catch (e) {
+      debugPrint('Error uploading registration face photo: $e');
+    }
 
     // حفظ بصمة الوجه فورياً في قاعدة البيانات السحابية (employee_faces)
     await repo.saveFaceDescriptorToServer(
@@ -70,8 +100,14 @@ class _ElectronicBiometricsScreenState
         'biometricType': 'face',
         'has_face_descriptor': true,
         'face_descriptor': descriptor,
+        'descriptors': descriptor,
         'requestType': 'biometric_registration',
         'status': 'pending_admin',
+        if (uploadedPhotoUrl != null) ...{
+          'photoUrl': uploadedPhotoUrl,
+          'capturedPhotoUrl': uploadedPhotoUrl,
+          'photo': uploadedPhotoUrl,
+        },
       },
     );
 

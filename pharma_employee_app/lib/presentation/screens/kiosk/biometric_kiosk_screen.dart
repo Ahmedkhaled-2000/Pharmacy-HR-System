@@ -373,10 +373,27 @@ class _BiometricKioskScreenState extends ConsumerState<BiometricKioskScreen> {
     required Color color,
   }) async {
     final snapshot = ref.read(employeeDataProvider).snapshot;
-    final registeredDescriptor =
+    String? registeredDescriptor =
         snapshot?.allFaceDescriptors[targetUser.id]?.toString() ??
         snapshot?.allFaceDescriptors[targetUser.code]?.toString() ??
         (targetUser.id == snapshot?.user.id ? snapshot?.faceDescriptor : null);
+
+    if (registeredDescriptor == null || registeredDescriptor.trim().isEmpty) {
+      final allEmps = snapshot?.allEmployees ?? [];
+      for (final e in allEmps) {
+        if (e is Map) {
+          final id = e['id']?.toString().trim();
+          final c = e['code']?.toString().trim();
+          if (id == targetUser.id || c == targetUser.code) {
+            final desc = e['face_descriptor']?.toString();
+            if (desc != null && desc.trim().isNotEmpty) {
+              registeredDescriptor = desc;
+              break;
+            }
+          }
+        }
+      }
+    }
 
     if (registeredDescriptor == null || registeredDescriptor.trim().isEmpty) {
       if (mounted) {
@@ -769,7 +786,7 @@ class _BiometricKioskScreenState extends ConsumerState<BiometricKioskScreen> {
                   ],
                 ),
                 content: Text(
-                  'لم تتطابق ملامح الوجه مع أي موظف مسجل بالفرع بنسبة 70% المعتمدة.\n(أعلى نسبة تطابق مسجلة: ${bestMatchPercentage.toStringAsFixed(1)}%).\nيمكنك توثيق الحضور بالصورة وطلب الاعتماد الفوري.',
+                  'لم تتطابق ملامح الوجه مع أي موظف مسجل بالفرع بنسبة 70% المعتمدة.\n(أعلى نسبة تطابق مسجلة: ${bestMatchPercentage.toStringAsFixed(1)}%).\n\nيرجى استخدام لوحة الأرقام لإدخال كود الموظف الخاص بك للتحقق المباشر من هويتك وتوثيق الحضور.',
                   style: const TextStyle(fontSize: 13, height: 1.4),
                 ),
                 actions: [
@@ -777,24 +794,6 @@ class _BiometricKioskScreenState extends ConsumerState<BiometricKioskScreen> {
                     onPressed: () => Navigator.pop(ctx),
                     child: const Text('إغلاق'),
                   ),
-                  if (topCandidateUser != null)
-                    ElevatedButton.icon(
-                      onPressed: () {
-                        Navigator.pop(ctx);
-                        _capturePhotoAndSubmitPendingAttendance(
-                          targetUser: topCandidateUser!,
-                          actionType: 'start_shift',
-                          actionTitle: 'طلب حضور موثق بالصورة',
-                          color: AppColors.warning,
-                        );
-                      },
-                      style: ElevatedButton.styleFrom(
-                        backgroundColor: AppColors.primary,
-                        foregroundColor: Colors.white,
-                      ),
-                      icon: const Icon(Icons.camera_alt_rounded, size: 16),
-                      label: Text('توثيق بالصورة (${topCandidateUser.name})'),
-                    ),
                 ],
               ),
             );

@@ -128,6 +128,25 @@ class EmployeeRepository {
           }
         } catch (_) {}
 
+        // تعزيز وفهرسة البصمات بكل من id و code لكل موظف
+        final rawEmps = val['employees'] as List<dynamic>? ?? [];
+        for (final emp in rawEmps) {
+          if (emp is! Map) continue;
+          final id = emp['id']?.toString().trim() ?? '';
+          final c = emp['code']?.toString().trim() ?? '';
+          final directDesc = emp['face_descriptor']?.toString();
+          if (directDesc != null && directDesc.isNotEmpty) {
+            if (id.isNotEmpty) allFaces[id] = directDesc;
+            if (c.isNotEmpty) allFaces[c] = directDesc;
+          } else {
+            final existingFace = allFaces[id] ?? allFaces[c];
+            if (existingFace != null) {
+              if (id.isNotEmpty) allFaces[id] = existingFace;
+              if (c.isNotEmpty) allFaces[c] = existingFace;
+            }
+          }
+        }
+
         return _parseLiveSnapshot(val, cleanCode, allFaces);
       }
     } catch (e) {
@@ -751,13 +770,117 @@ class EmployeeRepository {
         .map((sal) => Map<String, dynamic>.from(sal as Map))
         .toList();
 
+    // دالة تحليل ومحاذاة التواريخ الزمنية للطلبات بدقة
+    DateTime? extractRequestTimestamp(dynamic r, {bool preferApproval = false}) {
+      if (r is! Map) return null;
+      if (preferApproval) {
+        for (final key in ['approvedAt', 'decisionDate', 'actionDate', 'updatedAt', 'resolvedAt']) {
+          final s = r[key]?.toString();
+          if (s != null && s.isNotEmpty) {
+            final dt = DateTime.tryParse(s);
+            if (dt != null) return dt;
+          }
+        }
+      }
+      for (final key in ['createdAt', 'date', 'updatedAt', 'decisionDate', 'actionDate']) {
+        final s = r[key]?.toString();
+        if (s != null && s.isNotEmpty) {
+          final dt = DateTime.tryParse(s);
+          if (dt != null) return dt;
+        }
+      }
+      final id = r['id']?.toString() ?? '';
+      final match = RegExp(r'(\d{10,13})').firstMatch(id);
+      if (match != null) {
+        final ms = int.tryParse(match.group(1)!);
+        if (ms != null) {
+          return DateTime.fromMillisecondsSinceEpoch(
+            ms.toString().length == 10 ? ms * 1000 : ms,
+          );
+        }
+      }
+      return null;
+    }
+
+    // دالة محاذاة الخط الزمني البيومتري لكل موظف وفق قواعد هندسة البيانات
+    Map<String, dynamic> evaluateBiometricTimeline({
+      required String id,
+      required String code,
+      DateTime? initialResetTime,
+      DateTime? initialAppTime,
+    }) {
+      DateTime? latestReset = initialResetTime;
+      DateTime? latestReg = initialAppTime;
+      Map<String, dynamic>? latestRegReq;
+      Map<String, dynamic>? pendingReq;
+      DateTime? latestPendingTime;
+
+      for (final r in rawRequests) {
+        if (r is! Map) continue;
+        final t = r['type']?.toString().toLowerCase() ?? '';
+        final s = r['status']?.toString().toLowerCase() ?? '';
+        final rEmpId = r['employeeId']?.toString().trim() ?? '';
+        final rEmpCode = r['employeeCode']?.toString().trim() ?? '';
+        final isMine =
+            (rEmpId.isNotEmpty && (rEmpId == id || rEmpId == code)) ||
+            (rEmpCode.isNotEmpty && (rEmpCode == code || rEmpCode == id));
+
+        if (!isMine) continue;
+
+        final isApproved = (s == 'approved' || s == 'completed' || r['adminApproved'] == true);
+        final isPending = (s == 'pending' || s == 'pending_admin' || s == 'pending_branch');
+
+        if (t == 'biometric_reset') {
+          if (isApproved) {
+            final tReset = extractRequestTimestamp(r, preferApproval: true) ?? DateTime.now();
+            if (latestReset == null || tReset.isAfter(latestReset)) {
+              latestReset = tReset;
+            }
+          } else if (isPending) {
+            final tPend = extractRequestTimestamp(r) ?? DateTime.now();
+            if (latestPendingTime == null || tPend.isAfter(latestPendingTime)) {
+              latestPendingTime = tPend;
+              pendingReq = Map<String, dynamic>.from(r);
+            }
+          }
+        } else if (t == 'biometric_registration' || t == 'biometric_self_registration' || t == 'تأكيد بصمة الوجه') {
+          if (isApproved) {
+            final tReg = extractRequestTimestamp(r, preferApproval: true) ?? DateTime.now();
+            if (latestReg == null || tReg.isAfter(latestReg)) {
+              latestReg = tReg;
+              latestRegReq = Map<String, dynamic>.from(r);
+            }
+          } else if (isPending) {
+            final tPend = extractRequestTimestamp(r) ?? DateTime.now();
+            if (latestPendingTime == null || tPend.isAfter(latestPendingTime)) {
+              latestPendingTime = tPend;
+              pendingReq = Map<String, dynamic>.from(r);
+            }
+          }
+        }
+      }
+
+      // حساب الحالة الحقيقية: هل إعادة التعيين ما زالت سارية أم جاء بعدها اعتماد تسجيل جديد؟
+      final bool isResetActive = latestReset != null &&
+          (latestReg == null || latestReset.isAfter(latestReg));
+
+      return {
+        'isResetActive': isResetActive,
+        'latestResetTime': latestReset,
+        'latestRegTime': latestReg,
+        'latestRegReq': latestRegReq,
+        'pendingReq': pendingReq,
+        'latestPendingTime': latestPendingTime,
+      };
+    }
+
     // 9. استخراج قائمة الزملاء والفروع الحقيقية والبصمة الإلكترونية
     final allEmployeesList = employees.where((e) => e != null).map((e) {
       final m = Map<String, dynamic>.from(e as Map);
       final id = m['id']?.toString().trim() ?? '';
       final c = m['code']?.toString().trim() ?? '';
 
-      // فحص ما إذا كانت بصمة هذا الموظف قد أُعيد تعيينها بالإدارة
+      // فحص ما إذا كانت بصمة هذا الموظف قد أُعيد تعيينها بالإدارة مع مراجعة الخط الزمني للطلبات
       final empResetStr = m['biometricFaceResetAt']?.toString() ?? m['biometricResetAt']?.toString();
       final empAppStr = m['biometricFaceApprovedAt']?.toString() ?? m['biometricApprovedAt']?.toString() ?? m['face_registered_at']?.toString();
       DateTime? empResetTime, empAppTime;
@@ -767,13 +890,37 @@ class EmployeeRepository {
       if (empAppStr != null && empAppStr.isNotEmpty) {
         try { empAppTime = DateTime.parse(empAppStr); } catch (_) {}
       }
-      final bool empIsReset = empResetTime != null && (empAppTime == null || empResetTime.isAfter(empAppTime));
+
+      final bioStatus = evaluateBiometricTimeline(
+        id: id,
+        code: c,
+        initialResetTime: empResetTime,
+        initialAppTime: empAppTime,
+      );
+      final bool empIsReset = bioStatus['isResetActive'] as bool;
 
       if (empIsReset) {
         m['face_descriptor'] = null;
         m['hasFaceDescriptor'] = false;
         m['has_face_descriptor'] = false;
       } else {
+        // إذا كان هناك طلب تسجيل معتمد يحتوي على البصمة
+        final regReq = bioStatus['latestRegReq'] as Map<String, dynamic>?;
+        if (regReq != null) {
+          final reqDesc = regReq['descriptors'] ??
+              regReq['descriptor'] ??
+              regReq['face_descriptor'] ??
+              regReq['extraPayload']?['face_descriptor'] ??
+              regReq['extraPayload']?['descriptors'];
+          if (reqDesc != null) {
+            final descStr = reqDesc is String ? reqDesc : jsonEncode(reqDesc);
+            m['face_descriptor'] = descStr;
+            m['hasFaceDescriptor'] = true;
+            allFaces[id] = descStr;
+            if (c.isNotEmpty) allFaces[c] = descStr;
+          }
+        }
+
         final faceObj =
             allFaces[id] ??
             allFaces[c] ??
@@ -784,6 +931,10 @@ class EmployeeRepository {
               ? faceObj
               : jsonEncode(faceObj);
           m['hasFaceDescriptor'] = true;
+        } else if (m['face_descriptor'] != null && m['face_descriptor'].toString().isNotEmpty) {
+          m['hasFaceDescriptor'] = true;
+          allFaces[id] = m['face_descriptor'];
+          if (c.isNotEmpty) allFaces[c] = m['face_descriptor'];
         }
       }
       return m;
@@ -809,33 +960,34 @@ class EmployeeRepository {
       try { approvedTime = DateTime.parse(approvedStr); } catch (_) {}
     }
 
-    bool hasApprovedResetReq = false;
-    Map<String, dynamic>? pendingBioReq;
-    for (final r in rawRequests) {
-      if (r is Map) {
-        final t = r['type']?.toString().toLowerCase() ?? '';
-        final s = r['status']?.toString().toLowerCase() ?? '';
-        final rEmpId = r['employeeId']?.toString() ?? '';
-        final rEmpCode = r['employeeCode']?.toString() ?? '';
-        final isMine =
-            (rEmpId.isNotEmpty && rEmpId == empId) ||
-            (rEmpCode.isNotEmpty && rEmpCode == empCode);
-        if (isMine) {
-          if ((t == 'biometric_registration' || t == 'biometric_reset') &&
-              (s == 'pending' || s == 'pending_admin' || s == 'pending_branch')) {
-            pendingBioReq = Map<String, dynamic>.from(r);
-          } else if (t == 'biometric_reset' && (s == 'approved' || s == 'completed')) {
-            hasApprovedResetReq = true;
-          }
-        }
-      }
-    }
+    final currentBioStatus = evaluateBiometricTimeline(
+      id: empId,
+      code: empCode,
+      initialResetTime: resetTime,
+      initialAppTime: approvedTime,
+    );
 
-    final bool isFaceReset = hasApprovedResetReq ||
-        (resetTime != null && (approvedTime == null || resetTime.isAfter(approvedTime)));
+    final bool isFaceReset = currentBioStatus['isResetActive'] as bool;
+    Map<String, dynamic>? pendingBioReq = currentBioStatus['pendingReq'] as Map<String, dynamic>?;
+    final DateTime? latestPendingTime = currentBioStatus['latestPendingTime'] as DateTime?;
+    final DateTime? latestResetTime = currentBioStatus['latestResetTime'] as DateTime?;
 
     // استخراج معالم بصمة الوجه المسجلة للموظف
     String? faceDescriptor = empJson['face_descriptor']?.toString();
+
+    // فحص البصمة من الطلب المعتمد الأخير إذا وجدت
+    final latestRegReq = currentBioStatus['latestRegReq'] as Map<String, dynamic>?;
+    if (latestRegReq != null && (faceDescriptor == null || faceDescriptor.isEmpty)) {
+      final reqDesc = latestRegReq['descriptors'] ??
+          latestRegReq['descriptor'] ??
+          latestRegReq['face_descriptor'] ??
+          latestRegReq['extraPayload']?['face_descriptor'] ??
+          latestRegReq['extraPayload']?['descriptors'];
+      if (reqDesc != null) {
+        faceDescriptor = reqDesc is String ? reqDesc : jsonEncode(reqDesc);
+      }
+    }
+
     if (faceDescriptor == null || faceDescriptor.isEmpty) {
       final faceObj =
           allFaces[empId] ??
@@ -855,15 +1007,34 @@ class EmployeeRepository {
     if (isFaceReset) {
       hasFaceDescriptor = false;
       faceDescriptor = null;
-      // إذا كان هناك طلب تسجيل قديم أو طلب إعادة تعيين تم اعتماده، يتم تنظيفه ليتمكن الموظف من التسجيل فوراً
-      if (pendingBioReq?['type'] == 'biometric_reset' || pendingBioReq?['type'] == 'biometric_registration') {
-        pendingBioReq = null;
-      }
       // تنظيف أي بصمة قديمة لهذا الموظف من خريطة البصمات المحلية لمنع إعادة إحيائها
       allFaces.remove(empId);
       allFaces.remove(empCode);
       allFaces.remove('emp_$empCode');
       allFaces.remove('emp_$empId');
+
+      // إذا كان هناك طلب تسجيل جديد تم إرساله بعد إعادة التعيين وهو قيد الانتظار
+      if (pendingBioReq?['type'] == 'biometric_registration' &&
+          latestPendingTime != null &&
+          latestResetTime != null &&
+          latestPendingTime.isAfter(latestResetTime)) {
+        // طلب التسجيل الجديد قيد انتظار الإدارة، نتركه للعرض
+      } else {
+        pendingBioReq = null;
+      }
+    } else {
+      // إعادة التعيين غير سارية (البصمة معتمدة ونشطة)
+      // إذا كان هناك طلب تسجيل تمت الموافقة عليه وانتهى، لا يظهر كطلب معلق
+      if (pendingBioReq != null &&
+          (pendingBioReq['status'] == 'approved' ||
+              pendingBioReq['status'] == 'completed')) {
+        pendingBioReq = null;
+      }
+      // التأكد من تسجيل البصمة بخريطة البصمات لكود ومعرف الموظف
+      if (faceDescriptor != null && faceDescriptor.isNotEmpty) {
+        allFaces[empId] = faceDescriptor;
+        if (empCode.isNotEmpty) allFaces[empCode] = faceDescriptor;
+      }
     }
 
     // 5.ب استخراج حالة الوردية الحية النشطة للموظف من السيرفر
