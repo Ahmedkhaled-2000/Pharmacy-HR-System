@@ -258,20 +258,33 @@ class _BiometricKioskScreenState extends ConsumerState<BiometricKioskScreen> {
               if (punchType == 'photo_attendance') ...[
                 const SizedBox(height: 8),
                 Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 10,
+                    vertical: 4,
+                  ),
                   decoration: BoxDecoration(
                     color: AppColors.warning.withValues(alpha: 0.15),
                     borderRadius: BorderRadius.circular(12),
-                    border: Border.all(color: AppColors.warning.withValues(alpha: 0.4)),
+                    border: Border.all(
+                      color: AppColors.warning.withValues(alpha: 0.4),
+                    ),
                   ),
                   child: const Row(
                     mainAxisSize: MainAxisSize.min,
                     children: [
-                      Icon(Icons.hourglass_top_rounded, size: 14, color: AppColors.warning),
+                      Icon(
+                        Icons.hourglass_top_rounded,
+                        size: 14,
+                        color: AppColors.warning,
+                      ),
                       SizedBox(width: 4),
                       Text(
                         'توثيق بالصورة (طلب اعتماد قيد المراجعة)',
-                        style: TextStyle(color: AppColors.warning, fontSize: 11, fontWeight: FontWeight.bold),
+                        style: TextStyle(
+                          color: AppColors.warning,
+                          fontSize: 11,
+                          fontWeight: FontWeight.bold,
+                        ),
                       ),
                     ],
                   ),
@@ -458,7 +471,10 @@ class _BiometricKioskScreenState extends ConsumerState<BiometricKioskScreen> {
           children: [
             Icon(Icons.face_retouching_off_rounded, color: AppColors.warning),
             SizedBox(width: 8),
-            Text('البصمة غير مسجلة', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
+            Text(
+              'البصمة غير مسجلة',
+              style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
+            ),
           ],
         ),
         content: Text(
@@ -507,7 +523,10 @@ class _BiometricKioskScreenState extends ConsumerState<BiometricKioskScreen> {
           children: [
             Icon(Icons.warning_amber_rounded, color: AppColors.danger),
             SizedBox(width: 8),
-            Text('تعذر مطابقة الوجه', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
+            Text(
+              'تعذر مطابقة الوجه',
+              style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
+            ),
           ],
         ),
         content: Text(
@@ -557,7 +576,9 @@ class _BiometricKioskScreenState extends ConsumerState<BiometricKioskScreen> {
       ),
     );
 
-    if (result == null || (result.capturedImageBytes == null && result.capturedPhotoPath == null)) {
+    if (result == null ||
+        (result.capturedImageBytes == null &&
+            result.capturedPhotoPath == null)) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(
@@ -648,9 +669,15 @@ class _BiometricKioskScreenState extends ConsumerState<BiometricKioskScreen> {
       // 1. الموظف محدد بالفعل عبر لوحة الأرقام (PIN): التحقق المباشر من بصمته المسجلة
       await _handlePunchWithFaceVerification(
         targetUser: matchedEmp,
-        actionType: (snapshot?.isShiftActive ?? false) ? 'stop_shift' : 'start_shift',
-        actionTitle: (snapshot?.isShiftActive ?? false) ? 'إنهاء الوردية' : 'تسجيل حضور',
-        color: (snapshot?.isShiftActive ?? false) ? AppColors.danger : AppColors.primary,
+        actionType: (snapshot?.isShiftActive ?? false)
+            ? 'stop_shift'
+            : 'start_shift',
+        actionTitle: (snapshot?.isShiftActive ?? false)
+            ? 'إنهاء الوردية'
+            : 'تسجيل حضور',
+        color: (snapshot?.isShiftActive ?? false)
+            ? AppColors.danger
+            : AppColors.primary,
       );
     } else {
       // 2. التحقق الذكي عبر ملامح الوجه التلقائية لكافة موظفي الفرع (Zero-Touch Scan)
@@ -809,7 +836,9 @@ class _BiometricKioskScreenState extends ConsumerState<BiometricKioskScreen> {
     final snapshot = ref.watch(employeeDataProvider).snapshot;
     final allBranches = snapshot?.allBranches ?? [];
     final currentUser = ref.watch(authProvider).user;
-    final canSwitchBranch = BiometricKioskScreen.canUserSwitchBranch(currentUser);
+    final canSwitchBranch = BiometricKioskScreen.canUserSwitchBranch(
+      currentUser,
+    );
 
     // ── في حال جاري فحص شبكة الـ IP ──
     if (_isCheckingIp) {
@@ -1288,7 +1317,9 @@ class _BiometricKioskScreenState extends ConsumerState<BiometricKioskScreen> {
                                 }).toList(),
                                 onChanged: (val) {
                                   if (val != null) {
-                                    setState(() => _selectedKioskBranchId = val);
+                                    setState(
+                                      () => _selectedKioskBranchId = val,
+                                    );
                                     _checkBranchIpAuth();
                                   }
                                 },
@@ -1296,7 +1327,10 @@ class _BiometricKioskScreenState extends ConsumerState<BiometricKioskScreen> {
                             )
                           else
                             Container(
-                              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: 10,
+                                vertical: 4,
+                              ),
                               decoration: BoxDecoration(
                                 color: Colors.white.withValues(alpha: 0.1),
                                 borderRadius: BorderRadius.circular(10),
@@ -1305,14 +1339,24 @@ class _BiometricKioskScreenState extends ConsumerState<BiometricKioskScreen> {
                               child: Row(
                                 mainAxisSize: MainAxisSize.min,
                                 children: [
-                                  const Icon(Icons.lock_rounded, size: 12, color: AppColors.accentCyan),
+                                  const Icon(
+                                    Icons.lock_rounded,
+                                    size: 12,
+                                    color: AppColors.accentCyan,
+                                  ),
                                   const SizedBox(width: 4),
                                   Text(
-                                    allBranches.firstWhere(
-                                      (b) => b.id == _selectedKioskBranchId,
-                                      orElse: () => allBranches.first,
-                                    ).name,
-                                    style: const TextStyle(color: Colors.white, fontSize: 11, fontWeight: FontWeight.bold),
+                                    allBranches
+                                        .firstWhere(
+                                          (b) => b.id == _selectedKioskBranchId,
+                                          orElse: () => allBranches.first,
+                                        )
+                                        .name,
+                                    style: const TextStyle(
+                                      color: Colors.white,
+                                      fontSize: 11,
+                                      fontWeight: FontWeight.bold,
+                                    ),
                                   ),
                                 ],
                               ),
@@ -1506,12 +1550,12 @@ class _BiometricKioskScreenState extends ConsumerState<BiometricKioskScreen> {
                                 onPressed: _isPunching
                                     ? null
                                     : () => _handlePunchWithFaceVerification(
-                                          targetUser: matchedEmp,
-                                          actionType: 'start_shift',
-                                          actionTitle:
-                                              'تسجيل حضور وبدء الوردية 🟢',
-                                          color: AppColors.primary,
-                                        ),
+                                        targetUser: matchedEmp,
+                                        actionType: 'start_shift',
+                                        actionTitle:
+                                            'تسجيل حضور وبدء الوردية 🟢',
+                                        color: AppColors.primary,
+                                      ),
                                 style: ElevatedButton.styleFrom(
                                   backgroundColor: AppColors.primary,
                                   foregroundColor: Colors.white,
@@ -1541,15 +1585,15 @@ class _BiometricKioskScreenState extends ConsumerState<BiometricKioskScreen> {
                                 onPressed: _isPunching
                                     ? null
                                     : () => _handlePunchWithFaceVerification(
-                                          targetUser: matchedEmp,
-                                          actionType: isOnBreak
-                                              ? 'break_end'
-                                              : 'break_start',
-                                          actionTitle: isOnBreak
-                                              ? 'استئناف الوردية وإنهاء الراحة ☕'
-                                              : 'بدء استراحة البريك ⏸️',
-                                          color: AppColors.warning,
-                                        ),
+                                        targetUser: matchedEmp,
+                                        actionType: isOnBreak
+                                            ? 'break_end'
+                                            : 'break_start',
+                                        actionTitle: isOnBreak
+                                            ? 'استئناف الوردية وإنهاء الراحة ☕'
+                                            : 'بدء استراحة البريك ⏸️',
+                                        color: AppColors.warning,
+                                      ),
                                 style: OutlinedButton.styleFrom(
                                   side: const BorderSide(
                                     color: AppColors.warning,
@@ -1587,12 +1631,12 @@ class _BiometricKioskScreenState extends ConsumerState<BiometricKioskScreen> {
                                 onPressed: _isPunching
                                     ? null
                                     : () => _handlePunchWithFaceVerification(
-                                          targetUser: matchedEmp,
-                                          actionType: 'stop_shift',
-                                          actionTitle:
-                                              'توثيق الانصراف وإنهاء الوردية 🔴',
-                                          color: AppColors.danger,
-                                        ),
+                                        targetUser: matchedEmp,
+                                        actionType: 'stop_shift',
+                                        actionTitle:
+                                            'توثيق الانصراف وإنهاء الوردية 🔴',
+                                        color: AppColors.danger,
+                                      ),
                                 style: ElevatedButton.styleFrom(
                                   backgroundColor: AppColors.danger,
                                   foregroundColor: Colors.white,

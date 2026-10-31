@@ -144,3 +144,4 @@ class FaceAlignmentService {
     return top * (1.0 - fy) + bottom * fy;
   }
 }
+

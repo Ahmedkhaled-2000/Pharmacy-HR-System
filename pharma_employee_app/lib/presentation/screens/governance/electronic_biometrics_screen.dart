@@ -389,10 +389,13 @@ class _ElectronicBiometricsScreenState
     final snapshot = empData.snapshot;
 
     final hasBiometric = snapshot?.hasFaceDescriptor ?? false;
-    final isApprovedReset = snapshot?.isFaceResetApproved ?? false;
+    final isApprovedReset = (snapshot?.isFaceResetApproved ?? false) && !hasBiometric;
     final pendingReq = snapshot?.pendingBiometricRequest;
     final isPendingRegistration =
-        pendingReq != null && pendingReq['type'] == 'biometric_registration';
+        pendingReq != null &&
+        (pendingReq['type'] == 'biometric_registration' ||
+            pendingReq['type'] == 'biometric_self_registration' ||
+            pendingReq['type'] == 'تأكيد بصمة الوجه');
     final isPendingReset =
         pendingReq != null && pendingReq['type'] == 'biometric_reset';
 
@@ -423,7 +426,7 @@ class _ElectronicBiometricsScreenState
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   // 1. بطاقة الحالة الرئيسية (Hero Status Banner)
-                  if (hasBiometric) ...[
+                  if (hasBiometric && !isPendingRegistration) ...[
                     // حالة معتمدة ونشطة
                     _buildStatusCard(
                       context,
@@ -433,17 +436,6 @@ class _ElectronicBiometricsScreenState
                       icon: Icons.verified_rounded,
                       color: AppColors.primary,
                       badgeText: 'معتمدة رسميًا',
-                    ),
-                  ] else if (isApprovedReset) ...[
-                    // حالة الموافقة على إعادة التعيين
-                    _buildStatusCard(
-                      context,
-                      isDark: isDark,
-                      title: 'تمت الموافقة على إعادة تعيين بصمتك 🔄',
-                      subtitle: 'وافقت الإدارة العليا على طلبك وتم مسح البصمة السابقة بنجاح. يرجى الضغط على زر تسجيل بصمة جديدة بالأسفل لتوثيق ملامحك الحالية.',
-                      icon: Icons.restart_alt_rounded,
-                      color: AppColors.accentCyan,
-                      badgeText: 'معتمد لإعادة التسجيل',
                     ),
                   ] else if (isPendingRegistration) ...[
                     // حالة قيد المراجعة
@@ -455,6 +447,17 @@ class _ElectronicBiometricsScreenState
                       icon: Icons.hourglass_top_rounded,
                       color: AppColors.warning,
                       badgeText: 'قيد الاعتماد الإداري',
+                    ),
+                  ] else if (isApprovedReset) ...[
+                    // حالة الموافقة على إعادة التعيين
+                    _buildStatusCard(
+                      context,
+                      isDark: isDark,
+                      title: 'تمت الموافقة على إعادة تعيين بصمتك 🔄',
+                      subtitle: 'وافقت الإدارة العليا على طلبك وتم مسح البصمة السابقة بنجاح. يرجى الضغط على زر تسجيل بصمة جديدة بالأسفل لتوثيق ملامحك الحالية.',
+                      icon: Icons.restart_alt_rounded,
+                      color: AppColors.accentCyan,
+                      badgeText: 'معتمد لإعادة التسجيل',
                     ),
                   ] else ...[
                     // حالة غير مسجل

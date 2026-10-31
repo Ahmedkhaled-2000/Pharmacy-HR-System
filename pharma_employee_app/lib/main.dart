@@ -1,4 +1,5 @@
 import 'dart:ui';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_localizations/flutter_localizations.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -74,7 +75,11 @@ void main() async {
                   Text(
                     'تم استيعاب استثناء الواجهة بأمان لمنع إغلاق التطبيق.\nيمكنك العودة للرئيسية بنقرة واحدة.',
                     textAlign: TextAlign.center,
-                    style: TextStyle(fontSize: 13, color: Colors.grey.shade600, height: 1.4),
+                    style: TextStyle(
+                      fontSize: 13,
+                      color: Colors.grey.shade600,
+                      height: 1.4,
+                    ),
                   ),
                   const SizedBox(height: 24),
                   ElevatedButton.icon(
@@ -84,7 +89,10 @@ void main() async {
                     style: ElevatedButton.styleFrom(
                       backgroundColor: AppColors.primary,
                       foregroundColor: Colors.white,
-                      padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 24,
+                        vertical: 12,
+                      ),
                       shape: RoundedRectangleBorder(
                         borderRadius: BorderRadius.circular(14),
                       ),
@@ -93,7 +101,10 @@ void main() async {
                     icon: const Icon(Icons.home_rounded, size: 20),
                     label: const Text(
                       'العودة للواجهة الرئيسية',
-                      style: TextStyle(fontWeight: FontWeight.bold, fontSize: 14),
+                      style: TextStyle(
+                        fontWeight: FontWeight.bold,
+                        fontSize: 14,
+                      ),
                     ),
                   ),
                 ],

@@ -33,6 +33,19 @@
 ## 3. 🕒 سجل الحالة النشطة والتعديلات الأخيرة (Active State & Recent Changelog)
 
 * **آخر الالتزامات والتحديثات البرمجية:**
+  - `Release APK Generation - Permanent Biometric Descriptors Retrieval, Parallel Network Pipeline & Elimination of State Freezing (128.4 MB):`
+    - **بناء ونشر ملف التثبيت النهائي للإنتاج (`assembleRelease`) بنجاح واجتياز كافة الفحوصات (51/51 Unit Tests Passed):**
+      - 1. **القضاء التام والنهائي على تعليق وثبات صفحة البصمة الإلكترونية (Zero-Lock State Transition):**
+        - القضاء على الخلل الجذري الذي كان يفرغ البصمة الحقيقية من الذاكرة ويعطل حالتها (`hasFaceDescriptor = false`) بسبب وجود سجل تاريخي قديم لطلب إعادة تعيين (`biometric_reset`).
+        - اعتماد قاعدة هندسة البيانات الصارمة: إذا كانت البصمة متواجدة في جدول `public.employee_faces` أو مصفوفة `employees`، تُعتمد البصمة فورياً (`hasFaceDescriptor = true`) وتُلغى حالة إعادة التعيين (`isFaceResetApproved = false`)، مما ينقل الواجهة تلقائياً إلى الحالة الرسمية المعتمدة ("البصمة الإلكترونية معتمدة ونشطة ✅").
+      - 2. **استرجاع وفهرسة بصمات الوجه بدقة فائقة لكافة الموظفين والكشك:**
+        - الحفاظ على بصمات الوجه لكافة الزملاء في `allEmployeesList` وخريطة `allFaces` وربطها بالمعرفين (`id` و `code`) بصيغة JSON القياسية، مما مكّن كشك البصمة من التعرف الفوري ومطابقة الوجه فور إدخال الكود أو المسح السريع (Zero-Touch Scan).
+      - 3. **المزامنة الذرية ثنائية الاتجاه (Atomic Biometric Sync):**
+        - عند تسجيل أو تحديث بصمة الوجه، يتم الحفظ في جدول `public.employee_faces` وتحديث شريحة `employees` في `pharmacy-tracker-data` عبر `/settings/slice` وحذف أي وسم تاريخي لإعادة التعيين (`biometricFaceResetAt`) في خطوة واحدة متكاملة.
+      - 4. **تسريع الإقلاع والاستجابة بجلب متوازي للشبكة (Parallel Fetch Pipeline):**
+        - دمج طلبي `/settings` و `/faces` عبر `Future.wait` ليعملا بالتوازي بدلاً من التسلسل المتتالي، مما قلل زمن جلب البيانات إلى النصف وقضى على شاشات الانتظار البطيئة.
+      - 5. **نشر وتوزيع الـ APK النهائي المحدث (128.4 MB):**
+        - تم بناء ملف الإنتاج النهائي واجتياز 51 فحص برمجي بنجاح 100% ونشره على سطح المكتب ومجلد المشروع بصيغ `بوابة_الموظف_flutter.apk` و `pharma_employee_app.apk`.
   - `Release APK Generation - Chronological Biometric Request Resolution, Zero-Touch Identity Safety & Live Photo Enrollment (128.4 MB):`
     - **بناء ونشر ملف التثبيت النهائي للإنتاج (`assembleRelease`) بنجاح واجتياز كافة الفحوصات (50/50 Unit Tests Passed):**
       - 1. **محاذاة الخط الزمني البيومتري للطلبات (Chronological Biometric Request Resolution):**

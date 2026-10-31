@@ -3,7 +3,7 @@ import 'package:pharma_employee_app/data/repositories/employee_repository.dart';
 
 void main() {
   group('Biometric Reset State Tests', () {
-    test('Employee with biometricFaceResetAt newer than approvedAt must have hasFaceDescriptor == false and descriptor == null', () {
+    test('Employee with biometricFaceResetAt and no descriptors in DB must have hasFaceDescriptor == false and isFaceResetApproved == true', () {
       final empJson = {
         'id': 'emp_100',
         'code': '00',
@@ -14,10 +14,7 @@ void main() {
         'face_descriptor': null,
       };
 
-      final allFaces = {
-        'emp_100': '[0.1, 0.2, 0.3]',
-        '00': '[0.1, 0.2, 0.3]',
-      };
+      final allFaces = <String, dynamic>{};
 
       final snapshot = EmployeeRepository.parseSnapshotForTest(
         val: {
@@ -40,6 +37,49 @@ void main() {
       expect(snapshot.hasFaceDescriptor, isFalse);
       expect(snapshot.faceDescriptor, isNull);
       expect(snapshot.isFaceResetApproved, isTrue);
+    });
+
+    test('Employee with registered face in database retains active status and is not wiped by historical reset audit logs', () {
+      final empJson = {
+        'id': 'emp_100',
+        'code': '00',
+        'name': 'احمد خالد',
+        'has_face_descriptor': true,
+        'face_descriptor': '[0.1, 0.2, 0.3]',
+      };
+
+      final allFaces = {
+        'emp_100': '[0.1, 0.2, 0.3]',
+        '00': '[0.1, 0.2, 0.3]',
+      };
+
+      final snapshot = EmployeeRepository.parseSnapshotForTest(
+        val: {
+          'employees': [empJson],
+          'activeShifts': {},
+          'requests': [
+            {
+              'id': 'bio_reset_1793449205822',
+              'type': 'biometric_reset',
+              'status': 'approved',
+              'employeeId': 'emp_100',
+              'employeeCode': '00',
+              'createdAt': '2026-10-31T14:20:05Z',
+              'approvedAt': '2026-10-31T12:20:28Z',
+            }
+          ]
+        },
+        employeeCode: '00',
+        allFaces: allFaces,
+      );
+
+      expect(snapshot.hasFaceDescriptor, isTrue);
+      expect(snapshot.faceDescriptor, isNotNull);
+      expect(snapshot.isFaceResetApproved, isFalse);
+      expect(snapshot.allFaceDescriptors['00'], isNotNull);
+      expect(snapshot.allFaceDescriptors['emp_100'], isNotNull);
+      expect(snapshot.allEmployees.first['hasFaceDescriptor'], isTrue);
+      expect(snapshot.allEmployees.first['face_descriptor'], isNotNull);
     });
 
     test('Employee with new registration after reset has hasFaceDescriptor == true', () {

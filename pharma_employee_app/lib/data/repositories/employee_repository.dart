@@ -1,5 +1,6 @@
 import 'dart:convert';
 
+import 'package:dio/dio.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
@@ -100,10 +101,20 @@ class EmployeeRepository {
     }
 
     try {
-      final response = await _apiClient.get(
-        '/settings',
-        queryParameters: {'key': _storageKey},
-      );
+      final futures = await Future.wait([
+        _apiClient.get(
+          '/settings',
+          queryParameters: {'key': _storageKey},
+        ),
+        _apiClient.get('/faces').catchError((err) {
+          debugPrint('[Faces] Error loading faces in parallel: $err');
+          return Response(requestOptions: RequestOptions(path: '/faces'), statusCode: 500);
+        }),
+      ]);
+
+      final response = futures[0];
+      final facesRes = futures[1];
+
       final body = response.data;
       if (body != null && body['value'] != null) {
         final dynamic rawVal = body['value'];
@@ -113,20 +124,23 @@ class EmployeeRepository {
 
         // جلب بصمات الوجه الحيوية المسجلة رسمياً من السيرفر
         final Map<String, dynamic> allFaces = {};
-        try {
-          final facesRes = await _apiClient.get('/faces');
-          if (facesRes.statusCode == 200 && facesRes.data is Map) {
-            final fData = facesRes.data['data'];
-            if (fData is List) {
-              for (final f in fData) {
-                if (f is Map && f['employee_id'] != null) {
-                  final eId = f['employee_id'].toString().trim();
-                  allFaces[eId] = f['descriptor'];
+        if (facesRes is Response && facesRes.statusCode == 200 && facesRes.data is Map) {
+          final fData = facesRes.data['data'];
+          if (fData is List) {
+            for (final f in fData) {
+              if (f is Map && f['employee_id'] != null) {
+                final eId = f['employee_id'].toString().trim();
+                final desc = f['descriptor'];
+                if (desc != null) {
+                  final strDesc = desc is String ? desc : jsonEncode(desc);
+                  if (strDesc.isNotEmpty && strDesc != 'null' && strDesc != '[]') {
+                    allFaces[eId] = strDesc;
+                  }
                 }
               }
             }
           }
-        } catch (_) {}
+        }
 
         // تعزيز وفهرسة البصمات بكل من id و code لكل موظف
         final rawEmps = val['employees'] as List<dynamic>? ?? [];
@@ -134,15 +148,20 @@ class EmployeeRepository {
           if (emp is! Map) continue;
           final id = emp['id']?.toString().trim() ?? '';
           final c = emp['code']?.toString().trim() ?? '';
-          final directDesc = emp['face_descriptor']?.toString();
-          if (directDesc != null && directDesc.isNotEmpty) {
-            if (id.isNotEmpty) allFaces[id] = directDesc;
-            if (c.isNotEmpty) allFaces[c] = directDesc;
-          } else {
-            final existingFace = allFaces[id] ?? allFaces[c];
-            if (existingFace != null) {
-              if (id.isNotEmpty) allFaces[id] = existingFace;
-              if (c.isNotEmpty) allFaces[c] = existingFace;
+          final directDesc = emp['face_descriptor'];
+          if (directDesc != null) {
+            final descStr = directDesc is String ? directDesc : jsonEncode(directDesc);
+            if (descStr.isNotEmpty && descStr != 'null' && descStr != '[]') {
+              if (id.isNotEmpty) allFaces[id] = descStr;
+              if (c.isNotEmpty) allFaces[c] = descStr;
+            }
+          }
+          final existingFace = allFaces[id] ?? allFaces[c];
+          if (existingFace != null) {
+            final faceStr = existingFace is String ? existingFace : jsonEncode(existingFace);
+            if (faceStr.isNotEmpty && faceStr != 'null' && faceStr != '[]') {
+              if (id.isNotEmpty) allFaces[id] = faceStr;
+              if (c.isNotEmpty) allFaces[c] = faceStr;
             }
           }
         }
@@ -880,62 +899,32 @@ class EmployeeRepository {
       final id = m['id']?.toString().trim() ?? '';
       final c = m['code']?.toString().trim() ?? '';
 
-      // فحص ما إذا كانت بصمة هذا الموظف قد أُعيد تعيينها بالإدارة مع مراجعة الخط الزمني للطلبات
-      final empResetStr = m['biometricFaceResetAt']?.toString() ?? m['biometricResetAt']?.toString();
-      final empAppStr = m['biometricFaceApprovedAt']?.toString() ?? m['biometricApprovedAt']?.toString() ?? m['face_registered_at']?.toString();
-      DateTime? empResetTime, empAppTime;
-      if (empResetStr != null && empResetStr.isNotEmpty) {
-        try { empResetTime = DateTime.parse(empResetStr); } catch (_) {}
-      }
-      if (empAppStr != null && empAppStr.isNotEmpty) {
-        try { empAppTime = DateTime.parse(empAppStr); } catch (_) {}
-      }
+      // البحث عن بصمة الموظف في خريطة البصمات الموحدة أو كائن الموظف
+      final rawFace = allFaces[id] ??
+          allFaces[c] ??
+          allFaces['emp_$c'] ??
+          allFaces['emp_$id'] ??
+          m['face_descriptor'];
 
-      final bioStatus = evaluateBiometricTimeline(
-        id: id,
-        code: c,
-        initialResetTime: empResetTime,
-        initialAppTime: empAppTime,
-      );
-      final bool empIsReset = bioStatus['isResetActive'] as bool;
+      final normFace = (rawFace != null &&
+              rawFace.toString().trim().isNotEmpty &&
+              rawFace.toString() != 'null' &&
+              rawFace.toString() != '[]')
+          ? (rawFace is String ? rawFace : jsonEncode(rawFace))
+          : null;
 
-      if (empIsReset) {
+      if (normFace != null) {
+        m['face_descriptor'] = normFace;
+        m['hasFaceDescriptor'] = true;
+        m['has_face_descriptor'] = true;
+        if (id.isNotEmpty) allFaces[id] = normFace;
+        if (c.isNotEmpty) allFaces[c] = normFace;
+        if (c.isNotEmpty) allFaces['emp_$c'] = normFace;
+        if (id.isNotEmpty) allFaces['emp_$id'] = normFace;
+      } else {
         m['face_descriptor'] = null;
         m['hasFaceDescriptor'] = false;
         m['has_face_descriptor'] = false;
-      } else {
-        // إذا كان هناك طلب تسجيل معتمد يحتوي على البصمة
-        final regReq = bioStatus['latestRegReq'] as Map<String, dynamic>?;
-        if (regReq != null) {
-          final reqDesc = regReq['descriptors'] ??
-              regReq['descriptor'] ??
-              regReq['face_descriptor'] ??
-              regReq['extraPayload']?['face_descriptor'] ??
-              regReq['extraPayload']?['descriptors'];
-          if (reqDesc != null) {
-            final descStr = reqDesc is String ? reqDesc : jsonEncode(reqDesc);
-            m['face_descriptor'] = descStr;
-            m['hasFaceDescriptor'] = true;
-            allFaces[id] = descStr;
-            if (c.isNotEmpty) allFaces[c] = descStr;
-          }
-        }
-
-        final faceObj =
-            allFaces[id] ??
-            allFaces[c] ??
-            allFaces['emp_$c'] ??
-            allFaces['emp_$id'];
-        if (faceObj != null) {
-          m['face_descriptor'] = faceObj is String
-              ? faceObj
-              : jsonEncode(faceObj);
-          m['hasFaceDescriptor'] = true;
-        } else if (m['face_descriptor'] != null && m['face_descriptor'].toString().isNotEmpty) {
-          m['hasFaceDescriptor'] = true;
-          allFaces[id] = m['face_descriptor'];
-          if (c.isNotEmpty) allFaces[c] = m['face_descriptor'];
-        }
       }
       return m;
     }).toList();
@@ -967,73 +956,74 @@ class EmployeeRepository {
       initialAppTime: approvedTime,
     );
 
-    final bool isFaceReset = currentBioStatus['isResetActive'] as bool;
     Map<String, dynamic>? pendingBioReq = currentBioStatus['pendingReq'] as Map<String, dynamic>?;
-    final DateTime? latestPendingTime = currentBioStatus['latestPendingTime'] as DateTime?;
-    final DateTime? latestResetTime = currentBioStatus['latestResetTime'] as DateTime?;
 
-    // استخراج معالم بصمة الوجه المسجلة للموظف
-    String? faceDescriptor = empJson['face_descriptor']?.toString();
+    // استخراج معالم بصمة الوجه المسجلة للموظف من كافة المصادر الحية
+    final physicalDesc = allFaces[empId] ??
+        allFaces[empCode] ??
+        allFaces['emp_$empCode'] ??
+        allFaces['emp_$empId'] ??
+        empJson['face_descriptor'];
 
-    // فحص البصمة من الطلب المعتمد الأخير إذا وجدت
-    final latestRegReq = currentBioStatus['latestRegReq'] as Map<String, dynamic>?;
-    if (latestRegReq != null && (faceDescriptor == null || faceDescriptor.isEmpty)) {
-      final reqDesc = latestRegReq['descriptors'] ??
-          latestRegReq['descriptor'] ??
-          latestRegReq['face_descriptor'] ??
-          latestRegReq['extraPayload']?['face_descriptor'] ??
-          latestRegReq['extraPayload']?['descriptors'];
-      if (reqDesc != null) {
-        faceDescriptor = reqDesc is String ? reqDesc : jsonEncode(reqDesc);
-      }
-    }
+    String? faceDescriptor = (physicalDesc != null &&
+            physicalDesc.toString().trim().isNotEmpty &&
+            physicalDesc.toString() != 'null' &&
+            physicalDesc.toString() != '[]')
+        ? (physicalDesc is String ? physicalDesc : jsonEncode(physicalDesc))
+        : null;
 
+    // فحص البصمة من الطلب المعتمد الأخير إذا لم تكن موجودة بالفعل
     if (faceDescriptor == null || faceDescriptor.isEmpty) {
-      final faceObj =
-          allFaces[empId] ??
-          allFaces[empCode] ??
-          allFaces['emp_$empCode'] ??
-          allFaces['emp_$empId'];
-      if (faceObj != null) {
-        faceDescriptor = faceObj is String ? faceObj : jsonEncode(faceObj);
+      final latestRegReq = currentBioStatus['latestRegReq'] as Map<String, dynamic>?;
+      if (latestRegReq != null) {
+        final reqDesc = latestRegReq['descriptors'] ??
+            latestRegReq['descriptor'] ??
+            latestRegReq['face_descriptor'] ??
+            latestRegReq['extraPayload']?['face_descriptor'] ??
+            latestRegReq['extraPayload']?['descriptors'];
+        if (reqDesc != null) {
+          faceDescriptor = reqDesc is String ? reqDesc : jsonEncode(reqDesc);
+        }
       }
     }
-    bool hasFaceDescriptor =
-        (faceDescriptor != null && faceDescriptor.isNotEmpty) ||
-        empJson['has_face_descriptor'] == true ||
-        empJson['face_descriptor'] != null ||
-        empJson['hasFaceDescriptor'] == true;
 
-    if (isFaceReset) {
-      hasFaceDescriptor = false;
-      faceDescriptor = null;
-      // تنظيف أي بصمة قديمة لهذا الموظف من خريطة البصمات المحلية لمنع إعادة إحيائها
-      allFaces.remove(empId);
-      allFaces.remove(empCode);
-      allFaces.remove('emp_$empCode');
-      allFaces.remove('emp_$empId');
+    final bool hasFaceDescriptor = faceDescriptor != null && faceDescriptor.isNotEmpty;
+    bool isFaceResetApproved = false;
 
-      // إذا كان هناك طلب تسجيل جديد تم إرساله بعد إعادة التعيين وهو قيد الانتظار
-      if (pendingBioReq?['type'] == 'biometric_registration' &&
-          latestPendingTime != null &&
-          latestResetTime != null &&
-          latestPendingTime.isAfter(latestResetTime)) {
-        // طلب التسجيل الجديد قيد انتظار الإدارة، نتركه للعرض
-      } else {
-        pendingBioReq = null;
-      }
-    } else {
-      // إعادة التعيين غير سارية (البصمة معتمدة ونشطة)
+    if (hasFaceDescriptor) {
+      // الموظف لديه بصمة وجه مسجلة بالفعل في قاعدة البيانات ومحفوظة بنجاح
+      // يتم تثبيتها وتأكيد تواجدها في خريطة البصمات لكلا المعرفين
+      allFaces[empId] = faceDescriptor;
+      if (empCode.isNotEmpty) allFaces[empCode] = faceDescriptor;
+      if (empCode.isNotEmpty) allFaces['emp_$empCode'] = faceDescriptor;
+      if (empId.isNotEmpty) allFaces['emp_$empId'] = faceDescriptor;
+
+      // البصمة مسجلة ونشطة، فلا مجال لاعتبار إعادة التعيين معلقة
+      isFaceResetApproved = false;
+
       // إذا كان هناك طلب تسجيل تمت الموافقة عليه وانتهى، لا يظهر كطلب معلق
       if (pendingBioReq != null &&
           (pendingBioReq['status'] == 'approved' ||
               pendingBioReq['status'] == 'completed')) {
         pendingBioReq = null;
       }
-      // التأكد من تسجيل البصمة بخريطة البصمات لكود ومعرف الموظف
-      if (faceDescriptor != null && faceDescriptor.isNotEmpty) {
-        allFaces[empId] = faceDescriptor;
-        if (empCode.isNotEmpty) allFaces[empCode] = faceDescriptor;
+    } else {
+      // الموظف ليس لديه بصمة وجه مسجلة في قاعدة البيانات
+      final bool isResetActive = currentBioStatus['isResetActive'] as bool ||
+          empJson['biometricFaceResetAt'] != null ||
+          empJson['biometricResetAt'] != null;
+
+      if (pendingBioReq != null &&
+          (pendingBioReq['type'] == 'biometric_registration' ||
+              pendingBioReq['type'] == 'biometric_self_registration')) {
+        // هناك طلب تسجيل قيد مراجعة الإدارة
+        isFaceResetApproved = false;
+      } else if (isResetActive) {
+        // تمت الموافقة على إعادة التعيين وبانتظار تسجيل بصمة جديدة
+        isFaceResetApproved = true;
+      } else {
+        // البصمة غير مسجلة حالياً لأول مرة
+        isFaceResetApproved = false;
       }
     }
 
@@ -1117,7 +1107,7 @@ class EmployeeRepository {
       activeRosterSchedule: activeRosterSchedule,
       hasFaceDescriptor: hasFaceDescriptor,
       faceDescriptor: faceDescriptor,
-      isFaceResetApproved: isFaceReset,
+      isFaceResetApproved: isFaceResetApproved,
       pendingBiometricRequest: pendingBioReq,
       isLiveOnline: true,
       isShiftActive: isShiftActive,
@@ -1156,6 +1146,58 @@ class EmployeeRepository {
           'biometric_type': 'face',
         },
       );
+
+      // مزامنة فورية مع شريحة الموظفين في settings بقاعدة البيانات
+      try {
+        final existingSettings = await _apiClient.get(
+          '/settings',
+          queryParameters: {'key': _storageKey},
+        );
+        if (existingSettings.statusCode == 200 && existingSettings.data is Map) {
+          final stateData =
+              existingSettings.data['data'] ?? existingSettings.data['value'];
+          final Map<String, dynamic> valMap = stateData is String
+              ? jsonDecode(stateData)
+              : (stateData is Map ? Map<String, dynamic>.from(stateData) : {});
+          if (valMap['employees'] is List) {
+            final employeesList = List<Map<String, dynamic>>.from(
+              (valMap['employees'] as List)
+                  .whereType<Map<String, dynamic>>(),
+            );
+            bool found = false;
+            final nowStr = DateTime.now().toIso8601String();
+            for (int i = 0; i < employeesList.length; i++) {
+              final emp = employeesList[i];
+              if (emp['id']?.toString() == employeeId ||
+                  emp['code']?.toString() == employeeId) {
+                employeesList[i] = Map<String, dynamic>.from(emp)
+                  ..['has_face_descriptor'] = true
+                  ..['hasFaceDescriptor'] = true
+                  ..['face_descriptor'] = parsedDescriptor
+                  ..['biometricFaceApprovedAt'] = nowStr
+                  ..['biometricApprovedAt'] = nowStr
+                  ..remove('biometricFaceResetAt')
+                  ..remove('biometricResetAt');
+                found = true;
+                break;
+              }
+            }
+            if (found) {
+              await _apiClient.post(
+                '/settings/slice',
+                data: {
+                  'key': _storageKey,
+                  'sliceKey': 'employees',
+                  'sliceValue': employeesList,
+                },
+              );
+            }
+          }
+        }
+      } catch (e) {
+        debugPrint('[SaveFace] Note: settings slice sync error: $e');
+      }
+
       return res.statusCode == 200;
     } catch (_) {
       return false;
