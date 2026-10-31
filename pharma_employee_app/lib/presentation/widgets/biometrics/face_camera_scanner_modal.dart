@@ -7,6 +7,7 @@ import 'package:google_mlkit_face_detection/google_mlkit_face_detection.dart';
 import 'package:screen_brightness/screen_brightness.dart';
 import '../../../core/constants/app_colors.dart';
 import '../../../core/services/face_embedding_service.dart';
+import '../../../core/services/voice_guidance_service.dart';
 
 enum FaceScannerMode {
   enroll, // تسجيل بصمة وجه جديدة
@@ -19,6 +20,8 @@ class FaceScannerResult {
   final double similarity;
   final double matchPercentage;
   final String message;
+  final String? capturedPhotoPath;
+  final Uint8List? capturedImageBytes;
 
   const FaceScannerResult({
     required this.success,
@@ -26,6 +29,8 @@ class FaceScannerResult {
     this.similarity = 0.0,
     this.matchPercentage = 0.0,
     required this.message,
+    this.capturedPhotoPath,
+    this.capturedImageBytes,
   });
 }
 
@@ -151,6 +156,7 @@ class _FaceCameraScannerModalState extends State<FaceCameraScannerModal>
           _statusMessage = 'ضع وجهك داخل الإطار الدائري — تحقق ذكي فائق الدقة';
           _statusColor = Colors.white;
         });
+        VoiceGuidanceService.instance.speak('ضع وجهك داخل الإطار الدائري');
       }
     } catch (e) {
       if (mounted) {
@@ -165,6 +171,7 @@ class _FaceCameraScannerModalState extends State<FaceCameraScannerModal>
 
   @override
   void dispose() {
+    VoiceGuidanceService.instance.stop();
     _scanAnimController.dispose();
     _cameraController?.dispose();
     _faceDetector?.close();
@@ -247,6 +254,7 @@ class _FaceCameraScannerModalState extends State<FaceCameraScannerModal>
         });
 
         // تنبيه صوتي وحركي تفاعلي
+        VoiceGuidanceService.instance.speak('يرجى الرمش بعينيك الآن للتحقق من الحيوية');
         SystemSound.play(SystemSoundType.click);
         HapticFeedback.lightImpact();
 
@@ -294,6 +302,7 @@ class _FaceCameraScannerModalState extends State<FaceCameraScannerModal>
         _statusMessage = '✅ تم تأكيد الحيوية بنجاح! جارٍ مطابقة البصمة...';
         _statusColor = AppColors.primary;
       });
+      VoiceGuidanceService.instance.speak('تم تأكيد الحيوية، جارٍ مطابقة البصمة');
 
       // استخراج ومعالجة الوجه بالذكاء الاصطناعي (InsightFace ArcFace 512D)
       final imageBytes = await imageFile.readAsBytes();
@@ -329,6 +338,7 @@ class _FaceCameraScannerModalState extends State<FaceCameraScannerModal>
             _statusMessage = '✅ تم التقاط واستخراج بصمة الوجه (512D) بنجاح!';
             _statusColor = AppColors.primary;
           });
+          VoiceGuidanceService.instance.speak('تم استخراج بصمة الوجه بنجاح');
 
           await Future.delayed(const Duration(milliseconds: 600));
           if (mounted) {
@@ -340,6 +350,8 @@ class _FaceCameraScannerModalState extends State<FaceCameraScannerModal>
                 similarity: 1.0,
                 matchPercentage: 100.0,
                 message: 'تم استخراج بصمة الوجه البيومترية بنجاح وجاهزة للاعتماد',
+                capturedPhotoPath: imageFile.path,
+                capturedImageBytes: imageBytes,
               ),
             );
           }
@@ -358,11 +370,13 @@ class _FaceCameraScannerModalState extends State<FaceCameraScannerModal>
             if (mounted) {
               Navigator.pop(
                 context,
-                const FaceScannerResult(
+                FaceScannerResult(
                   success: false,
                   similarity: 0.0,
                   matchPercentage: 0.0,
                   message: 'لا توجد بصمة وجه مسجلة لهذا الموظف في قاعدة البيانات.',
+                  capturedPhotoPath: imageFile.path,
+                  capturedImageBytes: imageBytes,
                 ),
               );
             }
@@ -400,6 +414,12 @@ class _FaceCameraScannerModalState extends State<FaceCameraScannerModal>
             _statusColor = isMatch ? AppColors.primary : AppColors.warning;
           });
 
+          if (isMatch) {
+            VoiceGuidanceService.instance.speak('تم التحقق من بصمة الوجه بنجاح');
+          } else {
+            VoiceGuidanceService.instance.speak('تعذر مطابقة الوجه، يرجى توثيق الحضور بالصورة');
+          }
+
           await Future.delayed(const Duration(milliseconds: 700));
           if (mounted) {
             Navigator.pop(
@@ -412,6 +432,8 @@ class _FaceCameraScannerModalState extends State<FaceCameraScannerModal>
                 message: isMatch
                     ? 'تم فحص ومطابقة بصمة الوجه بنجاح بنسبة دقة $percentage%'
                     : 'درجة التطابق ($percentage%) أقل من الحد المعتمد (70%)، يرجى المحاولة في زاوية وإضاءة أفضل',
+                capturedPhotoPath: imageFile.path,
+                capturedImageBytes: imageBytes,
               ),
             );
           }
