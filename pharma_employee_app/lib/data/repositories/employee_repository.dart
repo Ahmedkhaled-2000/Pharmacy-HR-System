@@ -1069,41 +1069,6 @@ class EmployeeRepository {
     }
   }
 
-  /// 📸 رفع صورة توثيق الحضور والاعتماد عند تعذر مطابقة الوجه
-  Future<String?> uploadAttendancePhoto({
-    required UserModel user,
-    required Uint8List imageBytes,
-    String mimeType = 'image/jpeg',
-  }) async {
-    try {
-      final base64Image = base64Encode(imageBytes);
-      final attId = 'att_punch_${user.id}_${DateTime.now().millisecondsSinceEpoch}';
-
-      final attRes = await _apiClient.post(
-        '/attachments',
-        data: {
-          'id': attId,
-          'name': '$attId.jpg',
-          'type': mimeType,
-          'data': 'data:$mimeType;base64,$base64Image',
-          'size': imageBytes.length,
-          'employeeId': user.id,
-        },
-      );
-
-      final returnedUrl = (attRes.statusCode == 200 &&
-              attRes.data is Map &&
-              attRes.data['url'] != null)
-          ? attRes.data['url'].toString()
-          : '/api/attachments?id=$attId&raw=1';
-
-      return returnedUrl;
-    } catch (e) {
-      debugPrint('[AttendancePhoto] Error uploading: $e');
-      return null;
-    }
-  }
-
   /// ⏱️ تسجيل بصمة حية ذكية موثقة بالسيرفر (حضور، انصراف، بريك)
   Future<bool> recordPunch({
     required UserModel user,
@@ -1111,9 +1076,6 @@ class EmployeeRepository {
     actionType, // 'start_shift', 'stop_shift', 'break_start', 'break_end'
     required String branchId,
     String? branchName,
-    String? punchType,
-    String? photoUrl,
-    String? requestId,
   }) async {
     final now = DateTime.now();
     final dateStr =
@@ -1133,9 +1095,6 @@ class EmployeeRepository {
           'time': timeStr,
           'date': dateStr,
           'key': _storageKey,
-          'punchType': punchType ?? 'biometric',
-          if (photoUrl != null) 'photoUrl': photoUrl,
-          if (requestId != null) 'requestId': requestId,
         },
       );
 

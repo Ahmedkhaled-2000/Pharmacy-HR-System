@@ -1,6 +1,4 @@
 import 'dart:async';
-import 'dart:io';
-import 'dart:typed_data';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:intl/intl.dart';
@@ -152,9 +150,6 @@ class _BiometricKioskScreenState extends ConsumerState<BiometricKioskScreen> {
     required String actionType,
     required String actionTitle,
     required Color color,
-    String? punchType,
-    String? photoUrl,
-    String? requestId,
   }) async {
     if (_isPunching) return;
     setState(() => _isPunching = true);
@@ -170,9 +165,6 @@ class _BiometricKioskScreenState extends ConsumerState<BiometricKioskScreen> {
       actionType: actionType,
       branchId: _selectedKioskBranchId,
       branchName: branchName,
-      punchType: punchType,
-      photoUrl: photoUrl,
-      requestId: requestId,
     );
 
     setState(() => _isPunching = false);
@@ -185,7 +177,6 @@ class _BiometricKioskScreenState extends ConsumerState<BiometricKioskScreen> {
         color: color,
         success: ok,
         branchName: branchName,
-        punchType: punchType,
       );
       _onClear();
     }
@@ -197,7 +188,6 @@ class _BiometricKioskScreenState extends ConsumerState<BiometricKioskScreen> {
     required Color color,
     required bool success,
     required String branchName,
-    String? punchType,
   }) {
     final timeStr = DateFormat('hh:mm:ss a', 'ar_EG').format(DateTime.now());
     final dateStr = DateFormat('yyyy-MM-dd').format(DateTime.now());
@@ -239,28 +229,6 @@ class _BiometricKioskScreenState extends ConsumerState<BiometricKioskScreen> {
                 ),
                 textAlign: TextAlign.center,
               ),
-              if (punchType == 'photo_attendance') ...[
-                const SizedBox(height: 8),
-                Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
-                  decoration: BoxDecoration(
-                    color: AppColors.warning.withValues(alpha: 0.15),
-                    borderRadius: BorderRadius.circular(12),
-                    border: Border.all(color: AppColors.warning.withValues(alpha: 0.4)),
-                  ),
-                  child: const Row(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      Icon(Icons.hourglass_top_rounded, size: 14, color: AppColors.warning),
-                      SizedBox(width: 4),
-                      Text(
-                        'توثيق بالصورة (طلب اعتماد قيد المراجعة)',
-                        style: TextStyle(color: AppColors.warning, fontSize: 11, fontWeight: FontWeight.bold),
-                      ),
-                    ],
-                  ),
-                ),
-              ],
               const SizedBox(height: 6),
               Text(
                 user.name,
@@ -319,288 +287,68 @@ class _BiometricKioskScreenState extends ConsumerState<BiometricKioskScreen> {
     );
   }
 
-  /// 🎯 معالجة البصمة بإلزام فتح كاميرا الوجه وفحص الحيوية
-  Future<void> _handlePunchWithFaceVerification({
-    required UserModel targetUser,
-    required String actionType,
-    required String actionTitle,
-    required Color color,
-  }) async {
-    final snapshot = ref.read(employeeDataProvider).snapshot;
-    final registeredDescriptor = snapshot?.allFaceDescriptors[targetUser.id]?.toString() ??
-        snapshot?.allFaceDescriptors[targetUser.code]?.toString() ??
-        (targetUser.id == snapshot?.user.id ? snapshot?.faceDescriptor : null);
-
-    if (registeredDescriptor == null || registeredDescriptor.trim().isEmpty) {
-      if (mounted) {
-        _showNoFaceEnrolledFallbackDialog(
-          targetUser: targetUser,
-          actionType: actionType,
-          actionTitle: actionTitle,
-          color: color,
-        );
-      }
-      return;
-    }
-
-    final result = await Navigator.push<FaceScannerResult>(
-      context,
-      MaterialPageRoute(
-        builder: (_) => FaceCameraScannerModal(
-          mode: FaceScannerMode.verify,
-          registeredDescriptor: registeredDescriptor,
-          employeeName: targetUser.name,
-        ),
-      ),
-    );
-
-    if (result == null) return;
-
-    if (result.success) {
-      final matchPercent = result.matchPercentage > 0 ? result.matchPercentage : (result.similarity * 100);
-      await _executeKioskPunch(
-        targetUser: targetUser,
-        actionType: actionType,
-        actionTitle: '$actionTitle بالوجه (${matchPercent.toStringAsFixed(1)}%)',
-        color: color,
-        punchType: 'face_verified',
-      );
-    } else {
-      if (mounted) {
-        _showFaceMatchFailedFallbackDialog(
-          targetUser: targetUser,
-          actionType: actionType,
-          actionTitle: actionTitle,
-          color: color,
-          failureResult: result,
-        );
-      }
-    }
-  }
-
-  /// 📸 التقاط صورة حية للموظف وإرسال طلب اعتماد الحضور بالصورة فورياً
-  Future<void> _capturePhotoAndSubmitPendingAttendance({
-    required UserModel targetUser,
-    required String actionType,
-    required String actionTitle,
-    required Color color,
-    String? existingPhotoPath,
-    Uint8List? existingPhotoBytes,
-  }) async {
-    Uint8List? photoBytes = existingPhotoBytes;
-
-    if (photoBytes == null && existingPhotoPath != null) {
-      try {
-        final f = File(existingPhotoPath);
-        if (await f.exists()) {
-          photoBytes = await f.readAsBytes();
-        }
-      } catch (_) {}
-    }
-
-    if (photoBytes == null) {
-      final scanRes = await Navigator.push<FaceScannerResult>(
-        context,
-        MaterialPageRoute(
-          builder: (_) => FaceCameraScannerModal(
-            mode: FaceScannerMode.enroll,
-            employeeName: targetUser.name,
-          ),
-        ),
-      );
-
-      if (scanRes == null) return;
-      if (scanRes.capturedImageBytes != null) {
-        photoBytes = scanRes.capturedImageBytes;
-      } else if (scanRes.capturedPhotoPath != null) {
-        try {
-          final f = File(scanRes.capturedPhotoPath!);
-          if (await f.exists()) {
-            photoBytes = await f.readAsBytes();
-          }
-        } catch (_) {}
-      }
-    }
-
-    if (photoBytes == null) return;
-
-    if (mounted) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('جارٍ رفع الصورة وإرسال طلب الاعتماد للإدارة...'),
-          duration: Duration(seconds: 2),
-          backgroundColor: AppColors.primary,
-        ),
-      );
-    }
-
-    final repo = ref.read(employeeRepositoryProvider);
-    final photoUrl = await repo.uploadAttendancePhoto(
-      user: targetUser,
-      imageBytes: photoBytes,
-    );
-
-    final reqId = 'REQ-BIO-${DateTime.now().millisecondsSinceEpoch}';
-
-    await repo.submitRequestToServer(
-      user: targetUser,
-      requestType: 'biometric_verification',
-      reqId: reqId,
-      reason: 'توثيق حضور بالصورة الحية لتعذر مطابقة الوجه',
-      details: 'طلب اعتماد $actionTitle بالصورة الحية للموظف ${targetUser.name} في كشك البصمة.',
-      targetBranchId: _selectedKioskBranchId,
-      extraPayload: {
-        'photoUrl': photoUrl,
-        'punchType': 'photo_attendance',
-        'actionType': actionType,
-        'requiresBranchManager': true,
-        'requiresSuperAdmin': true,
-        'statusLabel': 'حضور بالصورة (بانتظار الاعتماد)',
-      },
-    );
-
-    await _executeKioskPunch(
-      targetUser: targetUser,
-      actionType: actionType,
-      actionTitle: '$actionTitle بالصورة (طلب اعتماد قيد المراجعة 📸)',
-      color: color,
-      punchType: 'photo_attendance',
-      photoUrl: photoUrl,
-      requestId: reqId,
-    );
-  }
-
-  void _showNoFaceEnrolledFallbackDialog({
-    required UserModel targetUser,
-    required String actionType,
-    required String actionTitle,
-    required Color color,
-  }) {
-    showDialog(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(22)),
-        title: const Row(
-          children: [
-            Icon(Icons.warning_amber_rounded, color: AppColors.warning),
-            SizedBox(width: 8),
-            Text('تنبيه البصمة الحيوية', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
-          ],
-        ),
-        content: Text(
-          'الموظف [${targetUser.name}] ليس لديه بصمة وجه معتمدة مسجلة بالنظام بعد.\n\nوفقاً للائحة كشك الصيدلية، يمكنك التقاط صورة حية للموظف وتوثيق الإجراء فورياً بطلب اعتماد يُرسل لمدير الفرع والإدارة العليا.',
-          style: const TextStyle(fontSize: 13, height: 1.5),
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(ctx),
-            child: const Text('إلغاء', style: TextStyle(color: Colors.grey)),
-          ),
-          ElevatedButton.icon(
-            onPressed: () {
-              Navigator.pop(ctx);
-              _capturePhotoAndSubmitPendingAttendance(
-                targetUser: targetUser,
-                actionType: actionType,
-                actionTitle: actionTitle,
-                color: color,
-              );
-            },
-            style: ElevatedButton.styleFrom(
-              backgroundColor: AppColors.primary,
-              foregroundColor: Colors.white,
-              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-            ),
-            icon: const Icon(Icons.camera_alt_rounded, size: 18),
-            label: const Text('التقاط صورة وطلب اعتماد', style: TextStyle(fontWeight: FontWeight.bold)),
-          ),
-        ],
-      ),
-    );
-  }
-
-  void _showFaceMatchFailedFallbackDialog({
-    required UserModel targetUser,
-    required String actionType,
-    required String actionTitle,
-    required Color color,
-    required FaceScannerResult failureResult,
-  }) {
-    showDialog(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(22)),
-        title: const Row(
-          children: [
-            Icon(Icons.face_retouching_off_rounded, color: AppColors.danger),
-            SizedBox(width: 8),
-            Text('تعذر مطابقة الوجه', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
-          ],
-        ),
-        content: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text(
-              'نسبة التطابق المسجلة (${failureResult.matchPercentage.toStringAsFixed(1)}%) أقل من الحد المعتمد (70%).',
-              style: const TextStyle(fontSize: 13, fontWeight: FontWeight.bold, color: AppColors.danger),
-            ),
-            const SizedBox(height: 8),
-            const Text(
-              'وفقاً للائحة كشك الصيدلية، يمكنك توثيق الحضور الآن بالتقاط صورة وتوثيقها كطلب معتمد قيد المراجعة لدى مدير الفرع والإدارة.',
-              style: TextStyle(fontSize: 12, height: 1.5, color: Color(0xFF64748B)),
-            ),
-          ],
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(ctx),
-            child: const Text('إلغاء', style: TextStyle(color: Colors.grey)),
-          ),
-          ElevatedButton.icon(
-            onPressed: () {
-              Navigator.pop(ctx);
-              _capturePhotoAndSubmitPendingAttendance(
-                targetUser: targetUser,
-                actionType: actionType,
-                actionTitle: actionTitle,
-                color: color,
-                existingPhotoPath: failureResult.capturedPhotoPath,
-                existingPhotoBytes: failureResult.capturedImageBytes,
-              );
-            },
-            style: ElevatedButton.styleFrom(
-              backgroundColor: AppColors.primary,
-              foregroundColor: Colors.white,
-              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-            ),
-            icon: const Icon(Icons.camera_alt_rounded, size: 18),
-            label: const Text('توثيق الحضور بالصورة', style: TextStyle(fontWeight: FontWeight.bold)),
-          ),
-        ],
-      ),
-    );
-  }
-
   /// 🧬 تسجيل البصمة الذكية بالوجه مع التحقق الصارم من نسبة المطابقة 70%
   Future<void> _handleFaceScanPunch() async {
     final snapshot = ref.read(employeeDataProvider).snapshot;
     final matchedEmp = _findMatchedEmployee(_inputCode);
 
     if (matchedEmp != null) {
-      // 1. الموظف محدد بالفعل عبر لوحة الأرقام (PIN): التحقق المباشر من بصمته المسجلة عبر الكاميرا
-      final isShiftActive = (matchedEmp.id == snapshot?.user.id) ? (snapshot?.isShiftActive ?? false) : false;
-      final actionType = isShiftActive ? 'stop_shift' : 'start_shift';
-      final actionTitle = isShiftActive ? 'تم توثيق الانصراف وإنهاء الوردية' : 'تم تسجيل الحضور وبدء الوردية';
-      final color = isShiftActive ? AppColors.danger : AppColors.primary;
+      // 1. الموظف محدد بالفعل عبر لوحة الأرقام (PIN): التحقق المباشر من بصمته المسجلة
+      final registeredDescriptor = snapshot?.allFaceDescriptors[matchedEmp.id]?.toString() ??
+          snapshot?.allFaceDescriptors[matchedEmp.code]?.toString() ??
+          (matchedEmp.id == snapshot?.user.id ? snapshot?.faceDescriptor : null);
 
-      await _handlePunchWithFaceVerification(
-        targetUser: matchedEmp,
-        actionType: actionType,
-        actionTitle: actionTitle,
-        color: color,
+      if (registeredDescriptor == null || registeredDescriptor.trim().isEmpty) {
+        showDialog(
+          context: context,
+          builder: (ctx) => AlertDialog(
+            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+            title: const Row(
+              children: [
+                Icon(Icons.warning_amber_rounded, color: AppColors.warning),
+                SizedBox(width: 8),
+                Text('تنبيه البصمة الحيوية', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
+              ],
+            ),
+            content: Text(
+              'الموظف [${matchedEmp.name}] ليس لديه بصمة وجه معتمدة مسجلة بالنظام بعد.\nيرجى استخدام لوحة الأرقام لتسجيل الحضور، أو تقديم طلب تسجيل بصمة من تطبيق الموظف.',
+              style: const TextStyle(fontSize: 13, height: 1.4),
+            ),
+            actions: [
+              TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('موافق')),
+            ],
+          ),
+        );
+        return;
+      }
+
+      final result = await Navigator.push<FaceScannerResult>(
+        context,
+        MaterialPageRoute(
+          builder: (_) => FaceCameraScannerModal(
+            mode: FaceScannerMode.verify,
+            registeredDescriptor: registeredDescriptor,
+            employeeName: matchedEmp.name,
+          ),
+        ),
       );
-      return;
+
+      if (result != null && result.success) {
+        final isShiftActive = (matchedEmp.id == snapshot?.user.id) ? (snapshot?.isShiftActive ?? false) : false;
+        final actionType = isShiftActive ? 'stop_shift' : 'start_shift';
+        final matchPercent = result.matchPercentage > 0 ? result.matchPercentage : (result.similarity * 100);
+        final title = isShiftActive
+            ? 'تم تسجيل الانصراف عبر الوجه بنجاح (${matchPercent.toStringAsFixed(1)}%)'
+            : 'تم تسجيل الحضور عبر الوجه بنجاح (${matchPercent.toStringAsFixed(1)}%)';
+        final color = isShiftActive ? AppColors.danger : AppColors.primary;
+
+        await _executeKioskPunch(
+          targetUser: matchedEmp,
+          actionType: actionType,
+          actionTitle: title,
+          color: color,
+        );
+      }
     } else {
       // 2. التحقق الذكي عبر ملامح الوجه التلقائية لكافة موظفي الفرع (Zero-Touch Scan)
       final allEmps = snapshot?.allEmployees ?? [];
@@ -722,8 +470,6 @@ class _BiometricKioskScreenState extends ConsumerState<BiometricKioskScreen> {
     final isDark = Theme.of(context).brightness == Brightness.dark;
     final snapshot = ref.watch(employeeDataProvider).snapshot;
     final allBranches = snapshot?.allBranches ?? [];
-    final currentUser = snapshot?.user ?? ref.watch(authProvider).user;
-    final canSwitchBranch = BiometricKioskScreen.canUserSwitchBranch(currentUser);
 
     // ── في حال جاري فحص شبكة الـ IP ──
     if (_isCheckingIp) {
@@ -847,58 +593,37 @@ class _BiometricKioskScreenState extends ConsumerState<BiometricKioskScreen> {
 
                   const SizedBox(height: 20),
 
-                  // إمكانية تبديل الفرع في حال كان للموظف فرع آخر مصرح به (أو عرض الفرع المعتمد المقفل)
+                  // إمكانية تبديل الفرع في حال كان للموظف فرع آخر مصرح به
                   if (allBranches.isNotEmpty) ...[
-                    if (canSwitchBranch)
-                      Container(
-                        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 4),
-                        decoration: BoxDecoration(
-                          color: isDark ? const Color(0xFF1E293B) : const Color(0xFFF1F5F9),
-                          borderRadius: BorderRadius.circular(14),
-                          border: Border.all(color: isDark ? AppColors.darkBorder : const Color(0xFFE2E8F0)),
-                        ),
-                        child: DropdownButtonHideUnderline(
-                          child: DropdownButton<String>(
-                            value: _selectedKioskBranchId.isNotEmpty && allBranches.any((b) => b.id == _selectedKioskBranchId)
-                                ? _selectedKioskBranchId
-                                : allBranches.first.id,
-                            isExpanded: true,
-                            dropdownColor: isDark ? const Color(0xFF1E293B) : Colors.white,
-                            items: allBranches.map((b) {
-                              return DropdownMenuItem(
-                                value: b.id,
-                                child: Text('تبديل الفرع: ${b.name}', style: const TextStyle(fontSize: 12, fontWeight: FontWeight.bold)),
-                              );
-                            }).toList(),
-                            onChanged: (val) {
-                              if (val != null) {
-                                setState(() => _selectedKioskBranchId = val);
-                                _checkBranchIpAuth();
-                              }
-                            },
-                          ),
-                        ),
-                      )
-                    else
-                      Container(
-                        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
-                        decoration: BoxDecoration(
-                          color: isDark ? const Color(0xFF1E293B) : const Color(0xFFF1F5F9),
-                          borderRadius: BorderRadius.circular(14),
-                          border: Border.all(color: isDark ? AppColors.darkBorder : const Color(0xFFE2E8F0)),
-                        ),
-                        child: Row(
-                          mainAxisAlignment: MainAxisAlignment.center,
-                          children: [
-                            const Icon(Icons.lock_rounded, size: 16, color: Color(0xFF64748B)),
-                            const SizedBox(width: 8),
-                            Text(
-                              'الفرع المعتمد: ${allBranches.firstWhere((b) => b.id == _selectedKioskBranchId, orElse: () => allBranches.first).name}',
-                              style: const TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: Color(0xFF64748B)),
-                            ),
-                          ],
+                    Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 4),
+                      decoration: BoxDecoration(
+                        color: isDark ? const Color(0xFF1E293B) : const Color(0xFFF1F5F9),
+                        borderRadius: BorderRadius.circular(14),
+                        border: Border.all(color: isDark ? AppColors.darkBorder : const Color(0xFFE2E8F0)),
+                      ),
+                      child: DropdownButtonHideUnderline(
+                        child: DropdownButton<String>(
+                          value: _selectedKioskBranchId.isNotEmpty && allBranches.any((b) => b.id == _selectedKioskBranchId)
+                              ? _selectedKioskBranchId
+                              : allBranches.first.id,
+                          isExpanded: true,
+                          dropdownColor: isDark ? const Color(0xFF1E293B) : Colors.white,
+                          items: allBranches.map((b) {
+                            return DropdownMenuItem(
+                              value: b.id,
+                              child: Text('تبديل الفرع: ${b.name}', style: const TextStyle(fontSize: 12, fontWeight: FontWeight.bold)),
+                            );
+                          }).toList(),
+                          onChanged: (val) {
+                            if (val != null) {
+                              setState(() => _selectedKioskBranchId = val);
+                              _checkBranchIpAuth();
+                            }
+                          },
                         ),
                       ),
+                    ),
                     const SizedBox(height: 16),
                   ],
 
@@ -1016,50 +741,29 @@ class _BiometricKioskScreenState extends ConsumerState<BiometricKioskScreen> {
                             ),
                           ],
                         ),
-                        // قائمة اختيار فرع الكشك أو شارة الفرع المقفل
+                        // قائمة اختيار فرع الكشك
                         if (allBranches.isNotEmpty)
-                          if (canSwitchBranch)
-                            DropdownButtonHideUnderline(
-                              child: DropdownButton<String>(
-                                value: _selectedKioskBranchId.isNotEmpty && allBranches.any((b) => b.id == _selectedKioskBranchId)
-                                    ? _selectedKioskBranchId
-                                    : allBranches.first.id,
-                                dropdownColor: const Color(0xFF1E293B),
-                                icon: const Icon(Icons.arrow_drop_down, color: Colors.white70),
-                                items: allBranches.map((b) {
-                                  return DropdownMenuItem(
-                                    value: b.id,
-                                    child: Text(b.name, style: const TextStyle(color: Colors.white, fontSize: 11, fontWeight: FontWeight.bold)),
-                                  );
-                                }).toList(),
-                                onChanged: (val) {
-                                  if (val != null) {
-                                    setState(() => _selectedKioskBranchId = val);
-                                    _checkBranchIpAuth();
-                                  }
-                                },
-                              ),
-                            )
-                          else
-                            Container(
-                              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
-                              decoration: BoxDecoration(
-                                color: Colors.white.withValues(alpha: 0.12),
-                                borderRadius: BorderRadius.circular(12),
-                                border: Border.all(color: Colors.white24),
-                              ),
-                              child: Row(
-                                mainAxisSize: MainAxisSize.min,
-                                children: [
-                                  const Icon(Icons.lock_rounded, size: 12, color: Colors.white70),
-                                  const SizedBox(width: 4),
-                                  Text(
-                                    allBranches.firstWhere((b) => b.id == _selectedKioskBranchId, orElse: () => allBranches.first).name,
-                                    style: const TextStyle(color: Colors.white, fontSize: 11, fontWeight: FontWeight.bold),
-                                  ),
-                                ],
-                              ),
+                          DropdownButtonHideUnderline(
+                            child: DropdownButton<String>(
+                              value: _selectedKioskBranchId.isNotEmpty && allBranches.any((b) => b.id == _selectedKioskBranchId)
+                                  ? _selectedKioskBranchId
+                                  : allBranches.first.id,
+                              dropdownColor: const Color(0xFF1E293B),
+                              icon: const Icon(Icons.arrow_drop_down, color: Colors.white70),
+                              items: allBranches.map((b) {
+                                return DropdownMenuItem(
+                                  value: b.id,
+                                  child: Text(b.name, style: const TextStyle(color: Colors.white, fontSize: 11, fontWeight: FontWeight.bold)),
+                                );
+                              }).toList(),
+                              onChanged: (val) {
+                                if (val != null) {
+                                  setState(() => _selectedKioskBranchId = val);
+                                  _checkBranchIpAuth();
+                                }
+                              },
                             ),
+                          ),
                       ],
                     ),
                     const SizedBox(height: 14),
@@ -1172,7 +876,7 @@ class _BiometricKioskScreenState extends ConsumerState<BiometricKioskScreen> {
                       ),
                       const SizedBox(height: 14),
 
-                      // أزرار الحضور والانصراف والبريك (موثقة بالكامل بكاميرا الوجه والذكاء الاصطناعي)
+                      // أزرار الحضور والانصراف والبريك
                       Row(
                         children: [
                           if (!isShiftActive) ...[
@@ -1180,10 +884,10 @@ class _BiometricKioskScreenState extends ConsumerState<BiometricKioskScreen> {
                               child: ElevatedButton.icon(
                                 onPressed: _isPunching
                                     ? null
-                                    : () => _handlePunchWithFaceVerification(
+                                    : () => _executeKioskPunch(
                                           targetUser: matchedEmp,
                                           actionType: 'start_shift',
-                                          actionTitle: 'تسجيل حضور وبدء الوردية 🟢',
+                                          actionTitle: 'تم تسجيل الحضور وبدء الوردية 🟢',
                                           color: AppColors.primary,
                                         ),
                                 style: ElevatedButton.styleFrom(
@@ -1201,10 +905,10 @@ class _BiometricKioskScreenState extends ConsumerState<BiometricKioskScreen> {
                               child: OutlinedButton.icon(
                                 onPressed: _isPunching
                                     ? null
-                                    : () => _handlePunchWithFaceVerification(
+                                    : () => _executeKioskPunch(
                                           targetUser: matchedEmp,
                                           actionType: isOnBreak ? 'break_end' : 'break_start',
-                                          actionTitle: isOnBreak ? 'استئناف الوردية وإنهاء الراحة ☕' : 'بدء استراحة البريك ⏸️',
+                                          actionTitle: isOnBreak ? 'تم استئناف الوردية وإنهاء الراحة ☕' : 'تم بدء استراحة البريك ⏸️',
                                           color: AppColors.warning,
                                         ),
                                 style: OutlinedButton.styleFrom(
@@ -1224,10 +928,10 @@ class _BiometricKioskScreenState extends ConsumerState<BiometricKioskScreen> {
                               child: ElevatedButton.icon(
                                 onPressed: _isPunching
                                     ? null
-                                    : () => _handlePunchWithFaceVerification(
+                                    : () => _executeKioskPunch(
                                           targetUser: matchedEmp,
                                           actionType: 'stop_shift',
-                                          actionTitle: 'توثيق الانصراف وإنهاء الوردية 🔴',
+                                          actionTitle: 'تم توثيق الانصراف وإنهاء الوردية 🔴',
                                           color: AppColors.danger,
                                         ),
                                 style: ElevatedButton.styleFrom(
