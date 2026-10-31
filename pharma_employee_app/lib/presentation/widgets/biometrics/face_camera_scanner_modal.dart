@@ -56,7 +56,8 @@ class _FaceCameraScannerModalState extends State<FaceCameraScannerModal>
   FaceDetector? _faceDetector;
   bool _isInitializing = true;
   bool _isProcessing = false;
-  bool _isTorchOn = false;
+  bool _isDisposing = false;
+  bool _isTorchOn = true;
   double? _originalBrightness;
   String _statusMessage = 'جارٍ تشغيل كاميرا الذكاء الاصطناعي...';
   Color _statusColor = AppColors.primary;
@@ -139,6 +140,11 @@ class _FaceCameraScannerModalState extends State<FaceCameraScannerModal>
 
       await controller.initialize();
 
+      if (!mounted || _isDisposing) {
+        await controller.dispose();
+        return;
+      }
+
       // إعداد كاشف الوجه بحساسية محسنة لأصعب الظروف
       final options = FaceDetectorOptions(
         performanceMode: FaceDetectorMode.accurate,
@@ -147,6 +153,11 @@ class _FaceCameraScannerModalState extends State<FaceCameraScannerModal>
         minFaceSize: 0.15, // التقاط الوجوه عن بعد أو في زوايا متغيرة
       );
       final detector = FaceDetector(options: options);
+
+      try {
+        _originalBrightness ??= await ScreenBrightness().current;
+        await ScreenBrightness().setScreenBrightness(1.0);
+      } catch (_) {}
 
       if (mounted) {
         setState(() {
@@ -170,6 +181,7 @@ class _FaceCameraScannerModalState extends State<FaceCameraScannerModal>
 
   @override
   void dispose() {
+    _isDisposing = true;
     _scanAnimController.dispose();
     _cameraController?.dispose();
     _faceDetector?.close();
@@ -300,9 +312,27 @@ class _FaceCameraScannerModalState extends State<FaceCameraScannerModal>
         _statusColor = AppColors.primary;
       });
 
-      // استخراج ومعالجة الوجه بالذكاء الاصطناعي (InsightFace ArcFace 512D)
+      // استخراج المعالم الخمسة للوجه من ML Kit لمحاذاته هندسياً ككشك الويب
+      List<math.Point<double>>? landmarks5;
+      final lEye = face.landmarks[FaceLandmarkType.leftEye]?.position;
+      final rEye = face.landmarks[FaceLandmarkType.rightEye]?.position;
+      final nose = face.landmarks[FaceLandmarkType.noseBase]?.position;
+      final lMouth = face.landmarks[FaceLandmarkType.leftMouth]?.position;
+      final rMouth = face.landmarks[FaceLandmarkType.rightMouth]?.position;
+
+      if (lEye != null && rEye != null && nose != null && lMouth != null && rMouth != null) {
+        landmarks5 = [
+          math.Point(lEye.x.toDouble(), lEye.y.toDouble()),
+          math.Point(rEye.x.toDouble(), rEye.y.toDouble()),
+          math.Point(nose.x.toDouble(), nose.y.toDouble()),
+          math.Point(lMouth.x.toDouble(), lMouth.y.toDouble()),
+          math.Point(rMouth.x.toDouble(), rMouth.y.toDouble()),
+        ];
+      }
+
+      // استخراج ومعالجة الوجه بالذكاء الاصطناعي مع المحاذاة الخماسية (InsightFace ArcFace 512D)
       final imageBytes = await imageFile.readAsBytes();
-      final face112 = FaceEmbeddingService.instance.cropAndResizeFace(
+      final face112 = FaceEmbeddingService.instance.alignOrCropFace(
         imageBytes: imageBytes,
         boundingBox: math.Rectangle(
           face.boundingBox.left,
@@ -310,6 +340,7 @@ class _FaceCameraScannerModalState extends State<FaceCameraScannerModal>
           face.boundingBox.width,
           face.boundingBox.height,
         ),
+        landmarks5: landmarks5,
       );
 
       if (face112 == null) {
@@ -323,8 +354,9 @@ class _FaceCameraScannerModalState extends State<FaceCameraScannerModal>
         return;
       }
 
-      // استخراج المتجه البيومتري 512D الحقيقي عبر نموذج ArcFace
-      final liveEmbedding = await FaceEmbeddingService.instance.getEmbeddingFromFaceImage(face112);
+      // استخراج المتجهات البيومترية 512D (الأصلية + المحسنة Dual-Pass)
+      final multiEmbeddings = await FaceEmbeddingService.instance.getMultiEmbeddings(face112);
+      final liveEmbedding = multiEmbeddings.isNotEmpty ? multiEmbeddings.first : null;
 
       if (widget.mode == FaceScannerMode.enroll) {
         // حالة تسجيل بصمة جديدة بالنموذج المعتمد ArcFace 512D
@@ -341,7 +373,9 @@ class _FaceCameraScannerModalState extends State<FaceCameraScannerModal>
               context,
               FaceScannerResult(
                 success: true,
-                descriptor: liveEmbedding != null ? jsonEncode(liveEmbedding) : null,
+                descriptor: multiEmbeddings.isNotEmpty
+                    ? jsonEncode(multiEmbeddings)
+                    : (liveEmbedding != null ? jsonEncode(liveEmbedding) : null),
                 similarity: 1.0,
                 matchPercentage: 100.0,
                 message: 'تم استخراج بصمة الوجه البيومترية بنجاح وجاهزة للاعتماد',
@@ -390,7 +424,7 @@ class _FaceCameraScannerModalState extends State<FaceCameraScannerModal>
 
         final matchRes = FaceEmbeddingService.compareFaces(
           savedDescriptor: widget.registeredDescriptor,
-          liveDescriptor: liveEmbedding,
+          liveDescriptor: multiEmbeddings,
           threshold: 70.0,
         );
 
@@ -447,7 +481,7 @@ class _FaceCameraScannerModalState extends State<FaceCameraScannerModal>
         child: Stack(
           children: [
             // 1. معاينة الكاميرا الحية
-            if (_cameraController != null && _cameraController!.value.isInitialized)
+            if (!_isDisposing && _cameraController != null && _cameraController!.value.isInitialized)
               Positioned.fill(
                 child: FittedBox(
                   fit: BoxFit.cover,
@@ -470,13 +504,14 @@ class _FaceCameraScannerModalState extends State<FaceCameraScannerModal>
                 ),
               ),
 
-            // 2. طبقة التعتيم مع النافذة البيضاوية الشفافة (Biometric Oval Mask)
+            // 2. طبقة التعتيم أو الإضاءة البيضاء الاستوديو مع النافذة البيضاوية (Studio Ring Light & Oval Mask)
             Positioned.fill(
               child: CustomPaint(
                 painter: _FaceMaskPainter(
                   borderColor: _statusColor,
                   scanProgress: _scanAnimController.value,
                   isScanning: _cameraController != null && _cameraController!.value.isInitialized,
+                  isTorchOn: _isTorchOn,
                 ),
               ),
             ),
@@ -660,25 +695,30 @@ class _FaceCameraScannerModalState extends State<FaceCameraScannerModal>
   }
 }
 
-/// رسام القناع البيضاوي والخط الليزري الماسح
+/// رسام القناع البيضاوي والخط الليزري الماسح وحلقة الإضاءة الاستوديو
 class _FaceMaskPainter extends CustomPainter {
   final Color borderColor;
   final double scanProgress;
   final bool isScanning;
+  final bool isTorchOn;
 
   _FaceMaskPainter({
     required this.borderColor,
     required this.scanProgress,
     required this.isScanning,
+    this.isTorchOn = false,
   });
 
   @override
   void paint(Canvas canvas, Size size) {
-    final backgroundPaint = Paint()..color = Colors.black.withValues(alpha: 0.65);
+    final backgroundPaint = Paint()
+      ..color = isTorchOn
+          ? const Color(0xFFFFFFF2) // 💡 إضاءة استوديو بيضاء فائقة السطوع تضيء وجه الموظف بالكامل في الظلام
+          : Colors.black.withValues(alpha: 0.65);
     final borderPaint = Paint()
-      ..color = borderColor
+      ..color = isTorchOn ? AppColors.primary : borderColor
       ..style = PaintingStyle.stroke
-      ..strokeWidth = 3.0;
+      ..strokeWidth = isTorchOn ? 4.0 : 3.0;
 
     final ovalWidth = size.width * 0.72;
     final ovalHeight = size.height * 0.46;
@@ -688,7 +728,7 @@ class _FaceMaskPainter extends CustomPainter {
       height: ovalHeight,
     );
 
-    // تفريغ الإطار البيضاوي في الخلفية المظلمة
+    // تفريغ الإطار البيضاوي في الخلفية المظلمة أو البيضاء المشعة
     final path = Path()
       ..addRect(Rect.fromLTWH(0, 0, size.width, size.height))
       ..addOval(ovalRect)
@@ -701,7 +741,7 @@ class _FaceMaskPainter extends CustomPainter {
     if (isScanning) {
       final laserY = ovalRect.top + (ovalRect.height * scanProgress);
       final laserPaint = Paint()
-        ..color = borderColor.withValues(alpha: 0.8)
+        ..color = (isTorchOn ? AppColors.primary : borderColor).withValues(alpha: 0.8)
         ..strokeWidth = 2.0;
 
       final halfChord = (ovalWidth / 2) * math.sqrt(1 - math.pow((laserY - ovalRect.center.dy) / (ovalHeight / 2), 2).clamp(0.0, 1.0));
@@ -715,7 +755,9 @@ class _FaceMaskPainter extends CustomPainter {
 
   @override
   bool shouldRepaint(covariant _FaceMaskPainter oldDelegate) {
-    return oldDelegate.scanProgress != scanProgress || oldDelegate.borderColor != borderColor;
+    return oldDelegate.scanProgress != scanProgress ||
+        oldDelegate.borderColor != borderColor ||
+        oldDelegate.isTorchOn != isTorchOn;
   }
 }
 

@@ -480,8 +480,8 @@ class _ElectronicBiometricsScreenState
                   ),
                   const SizedBox(height: 12),
 
-                  if (!hasBiometric && !isPendingRegistration) ...[
-                    // زر تسجيل البصمة الأول
+                  if (isApprovedReset || (!hasBiometric && !isPendingRegistration)) ...[
+                    // زر تسجيل البصمة الأول أو بعد الموافقة على إعادة التعيين
                     SizedBox(
                       width: double.infinity,
                       height: 52,
@@ -498,9 +498,11 @@ class _ElectronicBiometricsScreenState
                           elevation: 2,
                         ),
                         icon: const Icon(Icons.camera_alt_rounded, size: 22),
-                        label: const Text(
-                          'التقاط وتسجيل بصمة الوجه الآن',
-                          style: TextStyle(
+                        label: Text(
+                          isApprovedReset
+                              ? 'تسجيل بصمة الوجه الجديدة الآن 📸'
+                              : 'التقاط وتسجيل بصمة الوجه الآن',
+                          style: const TextStyle(
                             fontSize: 15,
                             fontWeight: FontWeight.bold,
                           ),

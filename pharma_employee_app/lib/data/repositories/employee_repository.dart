@@ -855,6 +855,10 @@ class EmployeeRepository {
     if (isFaceReset) {
       hasFaceDescriptor = false;
       faceDescriptor = null;
+      // إذا كان هناك طلب تسجيل قديم أو طلب إعادة تعيين تم اعتماده، يتم تنظيفه ليتمكن الموظف من التسجيل فوراً
+      if (pendingBioReq?['type'] == 'biometric_reset' || pendingBioReq?['type'] == 'biometric_registration') {
+        pendingBioReq = null;
+      }
       // تنظيف أي بصمة قديمة لهذا الموظف من خريطة البصمات المحلية لمنع إعادة إحيائها
       allFaces.remove(empId);
       allFaces.remove(empCode);
@@ -1069,6 +1073,43 @@ class EmployeeRepository {
     }
   }
 
+  /// 📸 رفع صورة توثيق الحضور البديل إلى جدول المرفقات بالسيرفر
+  Future<String?> uploadAttendancePhoto({
+    required UserModel user,
+    required Uint8List imageBytes,
+    String mimeType = 'image/jpeg',
+  }) async {
+    try {
+      final nowEpoch = DateTime.now().millisecondsSinceEpoch;
+      final attId = 'att_punch_${user.id}_$nowEpoch';
+      final base64Data = base64Encode(imageBytes);
+
+      final attRes = await _apiClient.post(
+        '/attachments',
+        data: {
+          'id': attId,
+          'entity_type': 'attendance_punch',
+          'entity_id': user.id,
+          'field_name': 'photo_punch',
+          'file_name': 'punch_${user.code}_$nowEpoch.jpg',
+          'mime_type': mimeType,
+          'file_size': imageBytes.length,
+          'file_data': 'data:$mimeType;base64,$base64Data',
+          'key': _storageKey,
+        },
+      );
+
+      return (attRes.statusCode == 200 &&
+              attRes.data is Map &&
+              attRes.data['url'] != null)
+          ? attRes.data['url'].toString()
+          : '/api/attachments?id=$attId&raw=1';
+    } catch (e) {
+      debugPrint('[AttendancePhoto] Error uploading photo: $e');
+      return null;
+    }
+  }
+
   /// ⏱️ تسجيل بصمة حية ذكية موثقة بالسيرفر (حضور، انصراف، بريك)
   Future<bool> recordPunch({
     required UserModel user,
@@ -1076,6 +1117,9 @@ class EmployeeRepository {
     actionType, // 'start_shift', 'stop_shift', 'break_start', 'break_end'
     required String branchId,
     String? branchName,
+    String? punchType,
+    String? photoUrl,
+    String? requestId,
   }) async {
     final now = DateTime.now();
     final dateStr =
@@ -1095,6 +1139,9 @@ class EmployeeRepository {
           'time': timeStr,
           'date': dateStr,
           'key': _storageKey,
+          if (punchType != null) 'punchType': punchType,
+          if (photoUrl != null) 'photoUrl': photoUrl,
+          if (requestId != null) 'requestId': requestId,
         },
       );
 

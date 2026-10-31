@@ -4,6 +4,7 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 import 'package:image/image.dart' as img;
 import 'package:onnxruntime/onnxruntime.dart';
+import 'face_alignment_service.dart';
 
 /// متتبع ومحلل حيوية الوجه ورمش العين الطبيعي (Blink Liveness Tracker)
 class BlinkTracker {
@@ -150,6 +151,62 @@ class FaceEmbeddingService {
       debugPrint('❌ [FaceAI] خطأ في تحميل نموذج الوجه: $e\n$stack');
       return false;
     }
+  }
+
+  /// استخراج الوجه مع المحاذاة الهندسية الخماسية المعيارية (5-Point Affine)
+  /// متطابقة 100% مع قالب ArcFace 112x112، ومع فولباك آمن للقص الصندوقي
+  img.Image? alignOrCropFace({
+    required Uint8List imageBytes,
+    required math.Rectangle<num> boundingBox,
+    List<math.Point<double>>? landmarks5,
+    double marginFactor = 0.15,
+  }) {
+    try {
+      final original = img.decodeImage(imageBytes);
+      if (original == null) return null;
+
+      // 1. محاولة المحاذاة الخماسية المعيارية (نفس كشك الويب بالضبط)
+      if (landmarks5 != null && landmarks5.length == 5) {
+        final aligned = FaceAlignmentService.instance.alignFace(
+          sourceImage: original,
+          srcPoints: landmarks5,
+        );
+        if (aligned != null) return aligned;
+      }
+
+      // 2. فولباك آمن للقص بالصندوق مع هامش تكيفي
+      return cropAndResizeFace(
+        imageBytes: imageBytes,
+        boundingBox: boundingBox,
+        marginFactor: marginFactor,
+      );
+    } catch (e) {
+      debugPrint('[FaceAI] خطأ في تجهيز الوجه: $e');
+      return null;
+    }
+  }
+
+  /// استخراج متجهات الوجه مع الدعم المزدوج للإضاءة الضعيفة (Dual-Pass CLAHE)
+  Future<List<List<double>>> getMultiEmbeddings(img.Image face112, {double? luminance}) async {
+    final primary = await getEmbeddingFromFaceImage(face112);
+    if (primary == null) return [];
+
+    final list = <List<double>>[primary];
+
+    // في ظروف الإضاءة الضعيفة أو لزيادة المرونة لأقصى حد: توليد متجه محسن بـ Gamma
+    try {
+      final enhanced = img.adjustColor(
+        img.Image.from(face112),
+        gamma: calculateGammaCorrection(luminance ?? 60.0),
+        contrast: 1.15,
+      );
+      final enhancedDesc = await getEmbeddingFromFaceImage(enhanced);
+      if (enhancedDesc != null && enhancedDesc.isNotEmpty) {
+        list.add(enhancedDesc);
+      }
+    } catch (_) {}
+
+    return list;
   }
 
   /// قص الوجه وتجهيزه بأبعاد 112x112 مع هامش آمن

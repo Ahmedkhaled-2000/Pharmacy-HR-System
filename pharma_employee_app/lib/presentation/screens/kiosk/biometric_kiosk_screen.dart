@@ -1,4 +1,7 @@
 import 'dart:async';
+import 'dart:io';
+import 'dart:typed_data';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:intl/intl.dart';
@@ -20,7 +23,8 @@ class BiometricKioskScreen extends ConsumerStatefulWidget {
   /// فحص صلاحية تبديل الفرع في الكشك (مسموح فقط للموظف متعدد الفروع أو الإدارة العليا)
   static bool canUserSwitchBranch(UserModel? user, {String? userRole}) {
     if (user == null) return false;
-    final r = (userRole ?? (user.permissions.canEditShift ? 'admin' : '')).toLowerCase();
+    final r = (userRole ?? (user.permissions.canEditShift ? 'admin' : ''))
+        .toLowerCase();
     if (r == 'admin' || r == 'owner') {
       return true;
     }
@@ -31,7 +35,8 @@ class BiometricKioskScreen extends ConsumerStatefulWidget {
   }
 
   @override
-  ConsumerState<BiometricKioskScreen> createState() => _BiometricKioskScreenState();
+  ConsumerState<BiometricKioskScreen> createState() =>
+      _BiometricKioskScreenState();
 }
 
 class _BiometricKioskScreenState extends ConsumerState<BiometricKioskScreen> {
@@ -56,7 +61,9 @@ class _BiometricKioskScreenState extends ConsumerState<BiometricKioskScreen> {
     });
 
     final user = ref.read(authProvider).user;
-    _selectedKioskBranchId = user?.branchId ?? (user?.branches.isNotEmpty == true ? user!.branches.first.id : '');
+    _selectedKioskBranchId =
+        user?.branchId ??
+        (user?.branches.isNotEmpty == true ? user!.branches.first.id : '');
 
     WidgetsBinding.instance.addPostFrameCallback((_) {
       _checkBranchIpAuth();
@@ -74,7 +81,9 @@ class _BiometricKioskScreenState extends ConsumerState<BiometricKioskScreen> {
     if (!mounted) return;
     setState(() => _isCheckingIp = true);
 
-    final ip = await BranchNetworkAuthService.getCurrentPublicIp(forceRefresh: true);
+    final ip = await BranchNetworkAuthService.getCurrentPublicIp(
+      forceRefresh: true,
+    );
     final snapshot = ref.read(employeeDataProvider).snapshot;
     final allBranches = snapshot?.allBranches ?? [];
 
@@ -121,24 +130,23 @@ class _BiometricKioskScreenState extends ConsumerState<BiometricKioskScreen> {
 
   UserModel? _findMatchedEmployee(String code) {
     if (code.trim().isEmpty) return null;
-    final allEmployees = ref.read(employeeDataProvider).snapshot?.allEmployees ?? [];
+    final allEmployees =
+        ref.read(employeeDataProvider).snapshot?.allEmployees ?? [];
     final currentTarget = code.trim();
 
-    final foundMap = allEmployees.firstWhere(
-      (e) {
-        final c = e['code']?.toString().trim();
-        final id = e['id']?.toString().trim();
-        return (c == currentTarget || id == currentTarget);
-      },
-      orElse: () => <String, dynamic>{},
-    );
+    final foundMap = allEmployees.firstWhere((e) {
+      final c = e['code']?.toString().trim();
+      final id = e['id']?.toString().trim();
+      return (c == currentTarget || id == currentTarget);
+    }, orElse: () => <String, dynamic>{});
 
     if (foundMap.isNotEmpty) {
       return UserModel.fromMap(foundMap);
     }
 
     final selfUser = ref.read(authProvider).user;
-    if (selfUser != null && (selfUser.code == currentTarget || selfUser.id == currentTarget)) {
+    if (selfUser != null &&
+        (selfUser.code == currentTarget || selfUser.id == currentTarget)) {
       return selfUser;
     }
 
@@ -150,14 +158,23 @@ class _BiometricKioskScreenState extends ConsumerState<BiometricKioskScreen> {
     required String actionType,
     required String actionTitle,
     required Color color,
+    String? punchType,
+    String? photoUrl,
+    String? requestId,
   }) async {
     if (_isPunching) return;
     setState(() => _isPunching = true);
 
     final snapshot = ref.read(employeeDataProvider).snapshot;
-    final branchName = snapshot?.allBranches
-        .firstWhere((b) => b.id == _selectedKioskBranchId, orElse: () => BranchModel(id: _selectedKioskBranchId, name: 'فرع الكشك'))
-        .name ?? 'فرع الكشك';
+    final branchName =
+        snapshot?.allBranches
+            .firstWhere(
+              (b) => b.id == _selectedKioskBranchId,
+              orElse: () =>
+                  BranchModel(id: _selectedKioskBranchId, name: 'فرع الكشك'),
+            )
+            .name ??
+        'فرع الكشك';
 
     final repo = ref.read(employeeRepositoryProvider);
     final ok = await repo.recordPunch(
@@ -165,6 +182,9 @@ class _BiometricKioskScreenState extends ConsumerState<BiometricKioskScreen> {
       actionType: actionType,
       branchId: _selectedKioskBranchId,
       branchName: branchName,
+      punchType: punchType,
+      photoUrl: photoUrl,
+      requestId: requestId,
     );
 
     setState(() => _isPunching = false);
@@ -177,6 +197,7 @@ class _BiometricKioskScreenState extends ConsumerState<BiometricKioskScreen> {
         color: color,
         success: ok,
         branchName: branchName,
+        punchType: punchType,
       );
       _onClear();
     }
@@ -188,6 +209,7 @@ class _BiometricKioskScreenState extends ConsumerState<BiometricKioskScreen> {
     required Color color,
     required bool success,
     required String branchName,
+    String? punchType,
   }) {
     final timeStr = DateFormat('hh:mm:ss a', 'ar_EG').format(DateTime.now());
     final dateStr = DateFormat('yyyy-MM-dd').format(DateTime.now());
@@ -201,7 +223,9 @@ class _BiometricKioskScreenState extends ConsumerState<BiometricKioskScreen> {
         });
 
         return AlertDialog(
-          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(24)),
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(24),
+          ),
           contentPadding: const EdgeInsets.all(24),
           content: Column(
             mainAxisSize: MainAxisSize.min,
@@ -210,7 +234,9 @@ class _BiometricKioskScreenState extends ConsumerState<BiometricKioskScreen> {
                 width: 76,
                 height: 76,
                 decoration: BoxDecoration(
-                  color: (success ? color : AppColors.danger).withValues(alpha: 0.15),
+                  color: (success ? color : AppColors.danger).withValues(
+                    alpha: 0.15,
+                  ),
                   shape: BoxShape.circle,
                 ),
                 child: Icon(
@@ -229,10 +255,36 @@ class _BiometricKioskScreenState extends ConsumerState<BiometricKioskScreen> {
                 ),
                 textAlign: TextAlign.center,
               ),
+              if (punchType == 'photo_attendance') ...[
+                const SizedBox(height: 8),
+                Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                  decoration: BoxDecoration(
+                    color: AppColors.warning.withValues(alpha: 0.15),
+                    borderRadius: BorderRadius.circular(12),
+                    border: Border.all(color: AppColors.warning.withValues(alpha: 0.4)),
+                  ),
+                  child: const Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Icon(Icons.hourglass_top_rounded, size: 14, color: AppColors.warning),
+                      SizedBox(width: 4),
+                      Text(
+                        'توثيق بالصورة (طلب اعتماد قيد المراجعة)',
+                        style: TextStyle(color: AppColors.warning, fontSize: 11, fontWeight: FontWeight.bold),
+                      ),
+                    ],
+                  ),
+                ),
+              ],
               const SizedBox(height: 6),
               Text(
                 user.name,
-                style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: AppColors.primary),
+                style: const TextStyle(
+                  fontSize: 16,
+                  fontWeight: FontWeight.bold,
+                  color: AppColors.primary,
+                ),
                 textAlign: TextAlign.center,
               ),
               Text(
@@ -241,7 +293,10 @@ class _BiometricKioskScreenState extends ConsumerState<BiometricKioskScreen> {
               ),
               const SizedBox(height: 16),
               Container(
-                padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 14,
+                  vertical: 10,
+                ),
                 decoration: BoxDecoration(
                   color: const Color(0xFFF8FAFC),
                   borderRadius: BorderRadius.circular(14),
@@ -252,16 +307,34 @@ class _BiometricKioskScreenState extends ConsumerState<BiometricKioskScreen> {
                     Row(
                       mainAxisAlignment: MainAxisAlignment.spaceBetween,
                       children: [
-                        const Text('الفرع:', style: TextStyle(fontSize: 12, color: Colors.grey)),
-                        Text(branchName, style: const TextStyle(fontSize: 12, fontWeight: FontWeight.bold)),
+                        const Text(
+                          'الفرع:',
+                          style: TextStyle(fontSize: 12, color: Colors.grey),
+                        ),
+                        Text(
+                          branchName,
+                          style: const TextStyle(
+                            fontSize: 12,
+                            fontWeight: FontWeight.bold,
+                          ),
+                        ),
                       ],
                     ),
                     const SizedBox(height: 4),
                     Row(
                       mainAxisAlignment: MainAxisAlignment.spaceBetween,
                       children: [
-                        const Text('التوقيت:', style: TextStyle(fontSize: 12, color: Colors.grey)),
-                        Text('$dateStr • $timeStr', style: const TextStyle(fontSize: 12, fontWeight: FontWeight.bold)),
+                        const Text(
+                          'التوقيت:',
+                          style: TextStyle(fontSize: 12, color: Colors.grey),
+                        ),
+                        Text(
+                          '$dateStr • $timeStr',
+                          style: const TextStyle(
+                            fontSize: 12,
+                            fontWeight: FontWeight.bold,
+                          ),
+                        ),
                       ],
                     ),
                   ],
@@ -275,9 +348,14 @@ class _BiometricKioskScreenState extends ConsumerState<BiometricKioskScreen> {
                   style: ElevatedButton.styleFrom(
                     backgroundColor: AppColors.primary,
                     foregroundColor: Colors.white,
-                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(12),
+                    ),
                   ),
-                  child: const Text('موافق (إغلاق)', style: TextStyle(fontWeight: FontWeight.bold)),
+                  child: const Text(
+                    'موافق (إغلاق)',
+                    style: TextStyle(fontWeight: FontWeight.bold),
+                  ),
                 ),
               ),
             ],
@@ -287,6 +365,263 @@ class _BiometricKioskScreenState extends ConsumerState<BiometricKioskScreen> {
     );
   }
 
+  /// 🎯 معالجة البصمة بإلزام فتح كاميرا الوجه وفحص الحيوية
+  Future<void> _handlePunchWithFaceVerification({
+    required UserModel targetUser,
+    required String actionType,
+    required String actionTitle,
+    required Color color,
+  }) async {
+    final snapshot = ref.read(employeeDataProvider).snapshot;
+    final registeredDescriptor =
+        snapshot?.allFaceDescriptors[targetUser.id]?.toString() ??
+        snapshot?.allFaceDescriptors[targetUser.code]?.toString() ??
+        (targetUser.id == snapshot?.user.id ? snapshot?.faceDescriptor : null);
+
+    if (registeredDescriptor == null || registeredDescriptor.trim().isEmpty) {
+      if (mounted) {
+        _showNoFaceEnrolledFallbackDialog(
+          targetUser: targetUser,
+          actionType: actionType,
+          actionTitle: actionTitle,
+          color: color,
+        );
+      }
+      return;
+    }
+
+    final result = await Navigator.push<FaceScannerResult>(
+      context,
+      MaterialPageRoute(
+        builder: (_) => FaceCameraScannerModal(
+          mode: FaceScannerMode.verify,
+          registeredDescriptor: registeredDescriptor,
+          employeeName: targetUser.name,
+        ),
+      ),
+    );
+
+    if (result != null) {
+      if (result.success) {
+        final matchPercent = result.matchPercentage > 0
+            ? result.matchPercentage
+            : (result.similarity * 100);
+        await _executeKioskPunch(
+          targetUser: targetUser,
+          actionType: actionType,
+          actionTitle: '$actionTitle (${matchPercent.toStringAsFixed(1)}%)',
+          color: color,
+          punchType: 'biometric_face',
+        );
+      } else {
+        if (mounted) {
+          _showFaceMatchFailedFallbackDialog(
+            targetUser: targetUser,
+            actionType: actionType,
+            actionTitle: actionTitle,
+            color: color,
+            failedResult: result,
+          );
+        }
+      }
+    }
+  }
+
+  void _showNoFaceEnrolledFallbackDialog({
+    required UserModel targetUser,
+    required String actionType,
+    required String actionTitle,
+    required Color color,
+  }) {
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+        title: const Row(
+          children: [
+            Icon(Icons.face_retouching_off_rounded, color: AppColors.warning),
+            SizedBox(width: 8),
+            Text('البصمة غير مسجلة', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
+          ],
+        ),
+        content: Text(
+          'الموظف [${targetUser.name}] ليس لديه بصمة وجه معتمدة مسجلة بالنظام.\nيمكنك توثيق الحضور بالتقاط صورة حية ورفعها لاعتماد الإدارة فورياً.',
+          style: const TextStyle(fontSize: 13, height: 1.4),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: const Text('إلغاء'),
+          ),
+          ElevatedButton.icon(
+            onPressed: () {
+              Navigator.pop(ctx);
+              _capturePhotoAndSubmitPendingAttendance(
+                targetUser: targetUser,
+                actionType: actionType,
+                actionTitle: actionTitle,
+                color: color,
+              );
+            },
+            style: ElevatedButton.styleFrom(
+              backgroundColor: AppColors.primary,
+              foregroundColor: Colors.white,
+            ),
+            icon: const Icon(Icons.camera_alt_rounded, size: 16),
+            label: const Text('التقاط صورة وتوثيق الحضور'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  void _showFaceMatchFailedFallbackDialog({
+    required UserModel targetUser,
+    required String actionType,
+    required String actionTitle,
+    required Color color,
+    required FaceScannerResult failedResult,
+  }) {
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+        title: const Row(
+          children: [
+            Icon(Icons.warning_amber_rounded, color: AppColors.danger),
+            SizedBox(width: 8),
+            Text('تعذر مطابقة الوجه', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
+          ],
+        ),
+        content: Text(
+          'نسبة التطابق (${failedResult.matchPercentage.toStringAsFixed(1)}%) أقل من الحد المعتمد (70%).\nيمكنك توثيق الحضور بالتقاط صورة حية وإرسال طلب اعتماد فوري للإدارة.',
+          style: const TextStyle(fontSize: 13, height: 1.4),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: const Text('إلغاء'),
+          ),
+          ElevatedButton.icon(
+            onPressed: () {
+              Navigator.pop(ctx);
+              _capturePhotoAndSubmitPendingAttendance(
+                targetUser: targetUser,
+                actionType: actionType,
+                actionTitle: actionTitle,
+                color: color,
+              );
+            },
+            style: ElevatedButton.styleFrom(
+              backgroundColor: AppColors.warning,
+              foregroundColor: Colors.white,
+            ),
+            icon: const Icon(Icons.camera_alt_rounded, size: 16),
+            label: const Text('توثيق بالصورة وطلب الاعتماد'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Future<void> _capturePhotoAndSubmitPendingAttendance({
+    required UserModel targetUser,
+    required String actionType,
+    required String actionTitle,
+    required Color color,
+  }) async {
+    final result = await Navigator.push<FaceScannerResult>(
+      context,
+      MaterialPageRoute(
+        builder: (_) => FaceCameraScannerModal(
+          mode: FaceScannerMode.enroll,
+          employeeName: targetUser.name,
+        ),
+      ),
+    );
+
+    if (result == null || (result.capturedImageBytes == null && result.capturedPhotoPath == null)) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('تم إلغاء التقاط الصورة، لم يتم توثيق الحضور.'),
+            backgroundColor: AppColors.warning,
+          ),
+        );
+      }
+      return;
+    }
+
+    setState(() => _isPunching = true);
+
+    try {
+      final repo = ref.read(employeeRepositoryProvider);
+      Uint8List? bytes = result.capturedImageBytes;
+      if (bytes == null && result.capturedPhotoPath != null) {
+        bytes = await File(result.capturedPhotoPath!).readAsBytes();
+      }
+
+      String? photoUrl;
+      if (bytes != null) {
+        photoUrl = await repo.uploadAttendancePhoto(
+          user: targetUser,
+          imageBytes: bytes,
+        );
+      }
+
+      final reqId = 'req_photo_punch_${DateTime.now().millisecondsSinceEpoch}';
+
+      await repo.submitRequestToServer(
+        user: targetUser,
+        requestType: 'biometric_verification',
+        reqId: reqId,
+        reason: 'توثيق حضور بديل بالصورة من كشك البصمة الذكي',
+        details: 'تم توثيق الحضور بالصورة نظراً لتعذر مطابقة الوجه آلياً، بانتظار اعتماد مدير الفرع والإدارة.',
+        targetBranchId: _selectedKioskBranchId,
+        extraPayload: {
+          'punchType': 'photo_attendance',
+          'photoUrl': photoUrl,
+          'actionType': actionType,
+          'status': 'pending',
+        },
+      );
+
+      final ok = await repo.recordPunch(
+        user: targetUser,
+        actionType: actionType,
+        branchId: _selectedKioskBranchId,
+        punchType: 'photo_attendance',
+        photoUrl: photoUrl,
+        requestId: reqId,
+      );
+
+      setState(() => _isPunching = false);
+      await ref.read(employeeDataProvider.notifier).refresh();
+
+      if (mounted) {
+        _showKioskConfirmationModal(
+          user: targetUser,
+          actionTitle: '$actionTitle (موثق بالصورة)',
+          color: AppColors.warning,
+          success: ok,
+          branchName: _selectedKioskBranchId,
+          punchType: 'photo_attendance',
+        );
+        _onClear();
+      }
+    } catch (e) {
+      setState(() => _isPunching = false);
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('حدث خطأ أثناء رفع الصورة: $e'),
+            backgroundColor: AppColors.danger,
+          ),
+        );
+      }
+    }
+  }
+
   /// 🧬 تسجيل البصمة الذكية بالوجه مع التحقق الصارم من نسبة المطابقة 70%
   Future<void> _handleFaceScanPunch() async {
     final snapshot = ref.read(employeeDataProvider).snapshot;
@@ -294,68 +629,20 @@ class _BiometricKioskScreenState extends ConsumerState<BiometricKioskScreen> {
 
     if (matchedEmp != null) {
       // 1. الموظف محدد بالفعل عبر لوحة الأرقام (PIN): التحقق المباشر من بصمته المسجلة
-      final registeredDescriptor = snapshot?.allFaceDescriptors[matchedEmp.id]?.toString() ??
-          snapshot?.allFaceDescriptors[matchedEmp.code]?.toString() ??
-          (matchedEmp.id == snapshot?.user.id ? snapshot?.faceDescriptor : null);
-
-      if (registeredDescriptor == null || registeredDescriptor.trim().isEmpty) {
-        showDialog(
-          context: context,
-          builder: (ctx) => AlertDialog(
-            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
-            title: const Row(
-              children: [
-                Icon(Icons.warning_amber_rounded, color: AppColors.warning),
-                SizedBox(width: 8),
-                Text('تنبيه البصمة الحيوية', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
-              ],
-            ),
-            content: Text(
-              'الموظف [${matchedEmp.name}] ليس لديه بصمة وجه معتمدة مسجلة بالنظام بعد.\nيرجى استخدام لوحة الأرقام لتسجيل الحضور، أو تقديم طلب تسجيل بصمة من تطبيق الموظف.',
-              style: const TextStyle(fontSize: 13, height: 1.4),
-            ),
-            actions: [
-              TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('موافق')),
-            ],
-          ),
-        );
-        return;
-      }
-
-      final result = await Navigator.push<FaceScannerResult>(
-        context,
-        MaterialPageRoute(
-          builder: (_) => FaceCameraScannerModal(
-            mode: FaceScannerMode.verify,
-            registeredDescriptor: registeredDescriptor,
-            employeeName: matchedEmp.name,
-          ),
-        ),
+      await _handlePunchWithFaceVerification(
+        targetUser: matchedEmp,
+        actionType: (snapshot?.isShiftActive ?? false) ? 'stop_shift' : 'start_shift',
+        actionTitle: (snapshot?.isShiftActive ?? false) ? 'إنهاء الوردية' : 'تسجيل حضور',
+        color: (snapshot?.isShiftActive ?? false) ? AppColors.danger : AppColors.primary,
       );
-
-      if (result != null && result.success) {
-        final isShiftActive = (matchedEmp.id == snapshot?.user.id) ? (snapshot?.isShiftActive ?? false) : false;
-        final actionType = isShiftActive ? 'stop_shift' : 'start_shift';
-        final matchPercent = result.matchPercentage > 0 ? result.matchPercentage : (result.similarity * 100);
-        final title = isShiftActive
-            ? 'تم تسجيل الانصراف عبر الوجه بنجاح (${matchPercent.toStringAsFixed(1)}%)'
-            : 'تم تسجيل الحضور عبر الوجه بنجاح (${matchPercent.toStringAsFixed(1)}%)';
-        final color = isShiftActive ? AppColors.danger : AppColors.primary;
-
-        await _executeKioskPunch(
-          targetUser: matchedEmp,
-          actionType: actionType,
-          actionTitle: title,
-          color: color,
-        );
-      }
     } else {
       // 2. التحقق الذكي عبر ملامح الوجه التلقائية لكافة موظفي الفرع (Zero-Touch Scan)
       final allEmps = snapshot?.allEmployees ?? [];
       final enrolledEmps = allEmps.where((e) {
         final id = e['id']?.toString() ?? '';
         final code = e['code']?.toString() ?? '';
-        final d = e['face_descriptor']?.toString() ??
+        final d =
+            e['face_descriptor']?.toString() ??
             snapshot?.allFaceDescriptors[id]?.toString() ??
             snapshot?.allFaceDescriptors[code]?.toString();
         return d != null && d.isNotEmpty;
@@ -365,12 +652,20 @@ class _BiometricKioskScreenState extends ConsumerState<BiometricKioskScreen> {
         showDialog(
           context: context,
           builder: (ctx) => AlertDialog(
-            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(20),
+            ),
             title: const Row(
               children: [
-                Icon(Icons.face_retouching_off_rounded, color: AppColors.warning),
+                Icon(
+                  Icons.face_retouching_off_rounded,
+                  color: AppColors.warning,
+                ),
                 SizedBox(width: 8),
-                Text('لا توجد بصمات مسجلة', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
+                Text(
+                  'لا توجد بصمات مسجلة',
+                  style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
+                ),
               ],
             ),
             content: const Text(
@@ -378,7 +673,10 @@ class _BiometricKioskScreenState extends ConsumerState<BiometricKioskScreen> {
               style: TextStyle(fontSize: 13, height: 1.4),
             ),
             actions: [
-              TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('إغلاق')),
+              TextButton(
+                onPressed: () => Navigator.pop(ctx),
+                child: const Text('إغلاق'),
+              ),
             ],
           ),
         );
@@ -399,14 +697,18 @@ class _BiometricKioskScreenState extends ConsumerState<BiometricKioskScreen> {
       if (result != null && result.success && result.descriptor != null) {
         final liveDesc = result.descriptor!;
         UserModel? bestMatchUser;
+        UserModel? topCandidateUser;
+        double bestMatchPercentage = 0.0;
         double bestSim = 0.0;
 
         for (final empMap in enrolledEmps) {
           final id = empMap['id']?.toString() ?? '';
           final code = empMap['code']?.toString() ?? '';
-          final sDesc = empMap['face_descriptor']?.toString() ??
+          final sDesc =
+              empMap['face_descriptor']?.toString() ??
               snapshot?.allFaceDescriptors[id]?.toString() ??
-              snapshot?.allFaceDescriptors[code]?.toString() ?? '';
+              snapshot?.allFaceDescriptors[code]?.toString() ??
+              '';
           if (sDesc.isEmpty) continue;
 
           final matchRes = FaceEmbeddingService.compareFaces(
@@ -415,20 +717,24 @@ class _BiometricKioskScreenState extends ConsumerState<BiometricKioskScreen> {
             threshold: 70.0,
           );
 
-          if (matchRes.similarity > bestSim) {
+          if (matchRes.matchPercentage > bestMatchPercentage) {
+            bestMatchPercentage = matchRes.matchPercentage;
             bestSim = matchRes.similarity;
+            topCandidateUser = UserModel.fromMap(empMap);
             if (matchRes.isMatch) {
-              bestMatchUser = UserModel.fromMap(empMap);
+              bestMatchUser = topCandidateUser;
             }
           }
         }
 
-        if (bestMatchUser != null && bestSim >= 0.70) {
-          final isShiftActive = (bestMatchUser.id == snapshot?.user.id) ? (snapshot?.isShiftActive ?? false) : false;
+        if (bestMatchUser != null && bestMatchPercentage >= 70.0) {
+          final isShiftActive = (bestMatchUser.id == snapshot?.user.id)
+              ? (snapshot?.isShiftActive ?? false)
+              : false;
           final actionType = isShiftActive ? 'stop_shift' : 'start_shift';
           final title = isShiftActive
-              ? 'تم تسجيل الانصراف بنجاح عبر الوجه (${(bestSim * 100).toStringAsFixed(1)}%)'
-              : 'تم تسجيل الحضور بنجاح عبر الوجه (${(bestSim * 100).toStringAsFixed(1)}%)';
+              ? 'تم تسجيل الانصراف بنجاح عبر الوجه (${bestMatchPercentage.toStringAsFixed(1)}%)'
+              : 'تم تسجيل الحضور بنجاح عبر الوجه (${bestMatchPercentage.toStringAsFixed(1)}%)';
           final color = isShiftActive ? AppColors.danger : AppColors.primary;
 
           await _executeKioskPunch(
@@ -436,26 +742,59 @@ class _BiometricKioskScreenState extends ConsumerState<BiometricKioskScreen> {
             actionType: actionType,
             actionTitle: title,
             color: color,
+            punchType: 'biometric_face',
           );
         } else {
           if (mounted) {
             showDialog(
               context: context,
               builder: (ctx) => AlertDialog(
-                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(20),
+                ),
                 title: const Row(
                   children: [
-                    Icon(Icons.face_retouching_off_rounded, color: AppColors.danger),
+                    Icon(
+                      Icons.face_retouching_off_rounded,
+                      color: AppColors.danger,
+                    ),
                     SizedBox(width: 8),
-                    Text('تعذر التعرف على الوجه', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
+                    Text(
+                      'تعذر التعرف على الوجه',
+                      style: TextStyle(
+                        fontSize: 16,
+                        fontWeight: FontWeight.bold,
+                      ),
+                    ),
                   ],
                 ),
                 content: Text(
-                  'لم تتطابق ملامح الوجه مع أي موظف مسجل بالفرع بنسبة 70% المعتمدة.\n(أعلى نسبة تطابق مسجلة: ${(bestSim * 100).toStringAsFixed(1)}%).\nيرجى استخدام كود الموظف ولوحة الأرقام.',
+                  'لم تتطابق ملامح الوجه مع أي موظف مسجل بالفرع بنسبة 70% المعتمدة.\n(أعلى نسبة تطابق مسجلة: ${bestMatchPercentage.toStringAsFixed(1)}%).\nيمكنك توثيق الحضور بالصورة وطلب الاعتماد الفوري.',
                   style: const TextStyle(fontSize: 13, height: 1.4),
                 ),
                 actions: [
-                  TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('إغلاق')),
+                  TextButton(
+                    onPressed: () => Navigator.pop(ctx),
+                    child: const Text('إغلاق'),
+                  ),
+                  if (topCandidateUser != null)
+                    ElevatedButton.icon(
+                      onPressed: () {
+                        Navigator.pop(ctx);
+                        _capturePhotoAndSubmitPendingAttendance(
+                          targetUser: topCandidateUser!,
+                          actionType: 'start_shift',
+                          actionTitle: 'طلب حضور موثق بالصورة',
+                          color: AppColors.warning,
+                        );
+                      },
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: AppColors.primary,
+                        foregroundColor: Colors.white,
+                      ),
+                      icon: const Icon(Icons.camera_alt_rounded, size: 16),
+                      label: Text('توثيق بالصورة (${topCandidateUser.name})'),
+                    ),
                 ],
               ),
             );
@@ -470,13 +809,20 @@ class _BiometricKioskScreenState extends ConsumerState<BiometricKioskScreen> {
     final isDark = Theme.of(context).brightness == Brightness.dark;
     final snapshot = ref.watch(employeeDataProvider).snapshot;
     final allBranches = snapshot?.allBranches ?? [];
+    final currentUser = ref.watch(authProvider).user;
+    final canSwitchBranch = BiometricKioskScreen.canUserSwitchBranch(currentUser);
 
     // ── في حال جاري فحص شبكة الـ IP ──
     if (_isCheckingIp) {
       return Scaffold(
-        backgroundColor: isDark ? AppColors.darkBackground : const Color(0xFFF1F5F9),
+        backgroundColor: isDark
+            ? AppColors.darkBackground
+            : const Color(0xFFF1F5F9),
         appBar: AppBar(
-          title: const Text('كشك البصمة والدوام الذكي', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
+          title: const Text(
+            'كشك البصمة والدوام الذكي',
+            style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16),
+          ),
         ),
         body: const Center(
           child: Column(
@@ -484,7 +830,10 @@ class _BiometricKioskScreenState extends ConsumerState<BiometricKioskScreen> {
             children: [
               CircularProgressIndicator(color: AppColors.primary),
               SizedBox(height: 16),
-              Text('جاري فحص الاتصال براوتر وشبكة الفرع المصرح بها...', style: TextStyle(fontSize: 13, color: Colors.grey)),
+              Text(
+                'جاري فحص الاتصال براوتر وشبكة الفرع المصرح بها...',
+                style: TextStyle(fontSize: 13, color: Colors.grey),
+              ),
             ],
           ),
         ),
@@ -494,9 +843,14 @@ class _BiometricKioskScreenState extends ConsumerState<BiometricKioskScreen> {
     // ── حاجز الأمان: غير مصرح بدخول كشك البصمة من خارج راوتر الفرع ──
     if (_ipAuthResult != null && !_ipAuthResult!.isAuthorized) {
       return Scaffold(
-        backgroundColor: isDark ? AppColors.darkBackground : const Color(0xFFF8FAFC),
+        backgroundColor: isDark
+            ? AppColors.darkBackground
+            : const Color(0xFFF8FAFC),
         appBar: AppBar(
-          title: const Text('تقييد أمان كشك البصمة', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
+          title: const Text(
+            'تقييد أمان كشك البصمة',
+            style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16),
+          ),
           actions: [
             IconButton(
               icon: const Icon(Icons.refresh_rounded),
@@ -519,18 +873,30 @@ class _BiometricKioskScreenState extends ConsumerState<BiometricKioskScreen> {
                       color: AppColors.danger.withValues(alpha: 0.12),
                       shape: BoxShape.circle,
                     ),
-                    child: const Icon(Icons.gpp_bad_rounded, size: 52, color: AppColors.danger),
+                    child: const Icon(
+                      Icons.gpp_bad_rounded,
+                      size: 52,
+                      color: AppColors.danger,
+                    ),
                   ),
                   const SizedBox(height: 20),
                   const Text(
                     'غير مصرح بفتح كشك البصمة',
-                    style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold, color: AppColors.danger),
+                    style: TextStyle(
+                      fontSize: 20,
+                      fontWeight: FontWeight.bold,
+                      color: AppColors.danger,
+                    ),
                     textAlign: TextAlign.center,
                   ),
                   const SizedBox(height: 8),
                   Text(
                     'تم تقييد كشك البصمة الإلكترونية بالاتصال المباشر براوتر وشبكة الفرع المصرح بها حصراً.',
-                    style: TextStyle(fontSize: 13, color: isDark ? Colors.white70 : const Color(0xFF64748B), height: 1.4),
+                    style: TextStyle(
+                      fontSize: 13,
+                      color: isDark ? Colors.white70 : const Color(0xFF64748B),
+                      height: 1.4,
+                    ),
                     textAlign: TextAlign.center,
                   ),
                   const SizedBox(height: 24),
@@ -542,9 +908,15 @@ class _BiometricKioskScreenState extends ConsumerState<BiometricKioskScreen> {
                     decoration: BoxDecoration(
                       color: isDark ? const Color(0xFF1E293B) : Colors.white,
                       borderRadius: BorderRadius.circular(18),
-                      border: Border.all(color: AppColors.danger.withValues(alpha: 0.3)),
+                      border: Border.all(
+                        color: AppColors.danger.withValues(alpha: 0.3),
+                      ),
                       boxShadow: [
-                        BoxShadow(color: Colors.black.withValues(alpha: 0.04), blurRadius: 10, offset: const Offset(0, 4)),
+                        BoxShadow(
+                          color: Colors.black.withValues(alpha: 0.04),
+                          blurRadius: 10,
+                          offset: const Offset(0, 4),
+                        ),
                       ],
                     ),
                     child: Column(
@@ -552,32 +924,62 @@ class _BiometricKioskScreenState extends ConsumerState<BiometricKioskScreen> {
                       children: [
                         Row(
                           children: [
-                            const Icon(Icons.location_on_rounded, size: 18, color: AppColors.primary),
+                            const Icon(
+                              Icons.location_on_rounded,
+                              size: 18,
+                              color: AppColors.primary,
+                            ),
                             const SizedBox(width: 8),
-                            const Text('الفرع المطلوب:', style: TextStyle(fontSize: 12, color: Colors.grey)),
+                            const Text(
+                              'الفرع المطلوب:',
+                              style: TextStyle(
+                                fontSize: 12,
+                                color: Colors.grey,
+                              ),
+                            ),
                             const Spacer(),
                             Text(
                               _ipAuthResult?.targetBranchName ?? 'الفرع',
-                              style: const TextStyle(fontSize: 13, fontWeight: FontWeight.bold),
+                              style: const TextStyle(
+                                fontSize: 13,
+                                fontWeight: FontWeight.bold,
+                              ),
                             ),
                           ],
                         ),
                         const Divider(height: 20),
                         Row(
                           children: [
-                            const Icon(Icons.wifi_rounded, size: 18, color: AppColors.warning),
+                            const Icon(
+                              Icons.wifi_rounded,
+                              size: 18,
+                              color: AppColors.warning,
+                            ),
                             const SizedBox(width: 8),
-                            const Text('عنوان الـ IP المكتشف:', style: TextStyle(fontSize: 12, color: Colors.grey)),
+                            const Text(
+                              'عنوان الـ IP المكتشف:',
+                              style: TextStyle(
+                                fontSize: 12,
+                                color: Colors.grey,
+                              ),
+                            ),
                             const Spacer(),
                             Container(
-                              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: 8,
+                                vertical: 3,
+                              ),
                               decoration: BoxDecoration(
                                 color: AppColors.danger.withValues(alpha: 0.1),
                                 borderRadius: BorderRadius.circular(8),
                               ),
                               child: Text(
                                 _ipAuthResult?.currentIp ?? 'غير معروف',
-                                style: const TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: AppColors.danger),
+                                style: const TextStyle(
+                                  fontSize: 12,
+                                  fontWeight: FontWeight.bold,
+                                  color: AppColors.danger,
+                                ),
                               ),
                             ),
                           ],
@@ -585,7 +987,11 @@ class _BiometricKioskScreenState extends ConsumerState<BiometricKioskScreen> {
                         const Divider(height: 20),
                         Text(
                           _ipAuthResult?.message ?? '',
-                          style: const TextStyle(fontSize: 12, color: AppColors.danger, height: 1.5),
+                          style: const TextStyle(
+                            fontSize: 12,
+                            color: AppColors.danger,
+                            height: 1.5,
+                          ),
                         ),
                       ],
                     ),
@@ -595,35 +1001,90 @@ class _BiometricKioskScreenState extends ConsumerState<BiometricKioskScreen> {
 
                   // إمكانية تبديل الفرع في حال كان للموظف فرع آخر مصرح به
                   if (allBranches.isNotEmpty) ...[
-                    Container(
-                      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 4),
-                      decoration: BoxDecoration(
-                        color: isDark ? const Color(0xFF1E293B) : const Color(0xFFF1F5F9),
-                        borderRadius: BorderRadius.circular(14),
-                        border: Border.all(color: isDark ? AppColors.darkBorder : const Color(0xFFE2E8F0)),
-                      ),
-                      child: DropdownButtonHideUnderline(
-                        child: DropdownButton<String>(
-                          value: _selectedKioskBranchId.isNotEmpty && allBranches.any((b) => b.id == _selectedKioskBranchId)
-                              ? _selectedKioskBranchId
-                              : allBranches.first.id,
-                          isExpanded: true,
-                          dropdownColor: isDark ? const Color(0xFF1E293B) : Colors.white,
-                          items: allBranches.map((b) {
-                            return DropdownMenuItem(
-                              value: b.id,
-                              child: Text('تبديل الفرع: ${b.name}', style: const TextStyle(fontSize: 12, fontWeight: FontWeight.bold)),
-                            );
-                          }).toList(),
-                          onChanged: (val) {
-                            if (val != null) {
-                              setState(() => _selectedKioskBranchId = val);
-                              _checkBranchIpAuth();
-                            }
-                          },
+                    if (canSwitchBranch)
+                      Container(
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 14,
+                          vertical: 4,
+                        ),
+                        decoration: BoxDecoration(
+                          color: isDark
+                              ? const Color(0xFF1E293B)
+                              : const Color(0xFFF1F5F9),
+                          borderRadius: BorderRadius.circular(14),
+                          border: Border.all(
+                            color: isDark
+                                ? AppColors.darkBorder
+                                : const Color(0xFFE2E8F0),
+                          ),
+                        ),
+                        child: DropdownButtonHideUnderline(
+                          child: DropdownButton<String>(
+                            value:
+                                _selectedKioskBranchId.isNotEmpty &&
+                                    allBranches.any(
+                                      (b) => b.id == _selectedKioskBranchId,
+                                    )
+                                ? _selectedKioskBranchId
+                                : allBranches.first.id,
+                            isExpanded: true,
+                            dropdownColor: isDark
+                                ? const Color(0xFF1E293B)
+                                : Colors.white,
+                            items: allBranches.map((b) {
+                              return DropdownMenuItem(
+                                value: b.id,
+                                child: Text(
+                                  'تبديل الفرع: ${b.name}',
+                                  style: const TextStyle(
+                                    fontSize: 12,
+                                    fontWeight: FontWeight.bold,
+                                  ),
+                                ),
+                              );
+                            }).toList(),
+                            onChanged: (val) {
+                              if (val != null) {
+                                setState(() => _selectedKioskBranchId = val);
+                                _checkBranchIpAuth();
+                              }
+                            },
+                          ),
+                        ),
+                      )
+                    else
+                      Container(
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 14,
+                          vertical: 10,
+                        ),
+                        decoration: BoxDecoration(
+                          color: AppColors.accentCyan.withValues(alpha: 0.1),
+                          borderRadius: BorderRadius.circular(14),
+                          border: Border.all(
+                            color: AppColors.accentCyan.withValues(alpha: 0.3),
+                          ),
+                        ),
+                        child: Row(
+                          mainAxisAlignment: MainAxisAlignment.center,
+                          children: [
+                            const Icon(
+                              Icons.lock_rounded,
+                              size: 16,
+                              color: AppColors.accentCyan,
+                            ),
+                            const SizedBox(width: 8),
+                            Text(
+                              'الفرع المعتمد: ${allBranches.firstWhere((b) => b.id == _selectedKioskBranchId, orElse: () => allBranches.first).name}',
+                              style: const TextStyle(
+                                fontSize: 13,
+                                fontWeight: FontWeight.bold,
+                                color: AppColors.accentCyan,
+                              ),
+                            ),
+                          ],
                         ),
                       ),
-                    ),
                     const SizedBox(height: 16),
                   ],
 
@@ -635,10 +1096,18 @@ class _BiometricKioskScreenState extends ConsumerState<BiometricKioskScreen> {
                           onPressed: () => Navigator.pop(context),
                           style: OutlinedButton.styleFrom(
                             padding: const EdgeInsets.symmetric(vertical: 13),
-                            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+                            shape: RoundedRectangleBorder(
+                              borderRadius: BorderRadius.circular(14),
+                            ),
                           ),
                           icon: const Icon(Icons.arrow_back_rounded, size: 18),
-                          label: const Text('العودة للرئيسية', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13)),
+                          label: const Text(
+                            'العودة للرئيسية',
+                            style: TextStyle(
+                              fontWeight: FontWeight.bold,
+                              fontSize: 13,
+                            ),
+                          ),
                         ),
                       ),
                       const SizedBox(width: 12),
@@ -649,10 +1118,18 @@ class _BiometricKioskScreenState extends ConsumerState<BiometricKioskScreen> {
                             backgroundColor: AppColors.primary,
                             foregroundColor: Colors.white,
                             padding: const EdgeInsets.symmetric(vertical: 13),
-                            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+                            shape: RoundedRectangleBorder(
+                              borderRadius: BorderRadius.circular(14),
+                            ),
                           ),
                           icon: const Icon(Icons.refresh_rounded, size: 18),
-                          label: const Text('إعادة الفحص', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13)),
+                          label: const Text(
+                            'إعادة الفحص',
+                            style: TextStyle(
+                              fontWeight: FontWeight.bold,
+                              fontSize: 13,
+                            ),
+                          ),
                         ),
                       ),
                     ],
@@ -667,20 +1144,39 @@ class _BiometricKioskScreenState extends ConsumerState<BiometricKioskScreen> {
 
     // ── واجهة الكشك المعتمدة بعد التحقق من راوتر الفرع ──
     final matchedEmp = _findMatchedEmployee(_inputCode);
-    final isShiftActive = (matchedEmp?.id == snapshot?.user.id) ? (snapshot?.isShiftActive ?? false) : false;
-    final isOnBreak = (matchedEmp?.id == snapshot?.user.id) ? (snapshot?.isOnBreak ?? false) : false;
+    final isShiftActive = (matchedEmp?.id == snapshot?.user.id)
+        ? (snapshot?.isShiftActive ?? false)
+        : false;
+    final isOnBreak = (matchedEmp?.id == snapshot?.user.id)
+        ? (snapshot?.isOnBreak ?? false)
+        : false;
 
-    final clockTimeStr = DateFormat('hh:mm:ss a', 'ar_EG').format(_currentClock);
-    final clockDateStr = DateFormat('EEEE، d MMMM yyyy', 'ar_EG').format(_currentClock);
+    final clockTimeStr = DateFormat(
+      'hh:mm:ss a',
+      'ar_EG',
+    ).format(_currentClock);
+    final clockDateStr = DateFormat(
+      'EEEE، d MMMM yyyy',
+      'ar_EG',
+    ).format(_currentClock);
 
     return Scaffold(
-      backgroundColor: isDark ? AppColors.darkBackground : const Color(0xFFF1F5F9),
+      backgroundColor: isDark
+          ? AppColors.darkBackground
+          : const Color(0xFFF1F5F9),
       appBar: AppBar(
         title: const Row(
           children: [
-            Icon(Icons.desktop_windows_rounded, color: AppColors.primary, size: 22),
+            Icon(
+              Icons.desktop_windows_rounded,
+              color: AppColors.primary,
+              size: 22,
+            ),
             SizedBox(width: 8),
-            Text('كشك البصمة والدوام الذكي', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
+            Text(
+              'كشك البصمة والدوام الذكي',
+              style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16),
+            ),
           ],
         ),
         actions: [
@@ -711,7 +1207,11 @@ class _BiometricKioskScreenState extends ConsumerState<BiometricKioskScreen> {
                   ),
                   borderRadius: BorderRadius.circular(20),
                   boxShadow: [
-                    BoxShadow(color: Colors.black.withValues(alpha: 0.15), blurRadius: 10, offset: const Offset(0, 4)),
+                    BoxShadow(
+                      color: Colors.black.withValues(alpha: 0.15),
+                      blurRadius: 10,
+                      offset: const Offset(0, 4),
+                    ),
                   ],
                 ),
                 child: Column(
@@ -729,41 +1229,96 @@ class _BiometricKioskScreenState extends ConsumerState<BiometricKioskScreen> {
                                 borderRadius: BorderRadius.circular(10),
                               ),
                               padding: const EdgeInsets.all(2),
-                              child: Image.asset('assets/images/app_logo.png', fit: BoxFit.contain),
+                              child: Image.asset(
+                                'assets/images/app_logo.png',
+                                fit: BoxFit.contain,
+                              ),
                             ),
                             const SizedBox(width: 10),
                             const Column(
                               crossAxisAlignment: CrossAxisAlignment.start,
                               children: [
-                                Text('منظومة إدارة الصيدليات', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 13)),
-                                Text('محطة الحضور الميداني (Kiosk Station)', style: TextStyle(color: Colors.white70, fontSize: 10)),
+                                Text(
+                                  'منظومة إدارة الصيدليات',
+                                  style: TextStyle(
+                                    color: Colors.white,
+                                    fontWeight: FontWeight.bold,
+                                    fontSize: 13,
+                                  ),
+                                ),
+                                Text(
+                                  'محطة الحضور الميداني (Kiosk Station)',
+                                  style: TextStyle(
+                                    color: Colors.white70,
+                                    fontSize: 10,
+                                  ),
+                                ),
                               ],
                             ),
                           ],
                         ),
-                        // قائمة اختيار فرع الكشك
-                        if (allBranches.isNotEmpty)
-                          DropdownButtonHideUnderline(
-                            child: DropdownButton<String>(
-                              value: _selectedKioskBranchId.isNotEmpty && allBranches.any((b) => b.id == _selectedKioskBranchId)
-                                  ? _selectedKioskBranchId
-                                  : allBranches.first.id,
-                              dropdownColor: const Color(0xFF1E293B),
-                              icon: const Icon(Icons.arrow_drop_down, color: Colors.white70),
-                              items: allBranches.map((b) {
-                                return DropdownMenuItem(
-                                  value: b.id,
-                                  child: Text(b.name, style: const TextStyle(color: Colors.white, fontSize: 11, fontWeight: FontWeight.bold)),
-                                );
-                              }).toList(),
-                              onChanged: (val) {
-                                if (val != null) {
-                                  setState(() => _selectedKioskBranchId = val);
-                                  _checkBranchIpAuth();
-                                }
-                              },
+                        // قائمة اختيار أو قفل فرع الكشك
+                        if (allBranches.isNotEmpty) ...[
+                          if (canSwitchBranch)
+                            DropdownButtonHideUnderline(
+                              child: DropdownButton<String>(
+                                value:
+                                    _selectedKioskBranchId.isNotEmpty &&
+                                        allBranches.any(
+                                          (b) => b.id == _selectedKioskBranchId,
+                                        )
+                                    ? _selectedKioskBranchId
+                                    : allBranches.first.id,
+                                dropdownColor: const Color(0xFF1E293B),
+                                icon: const Icon(
+                                  Icons.arrow_drop_down,
+                                  color: Colors.white70,
+                                ),
+                                items: allBranches.map((b) {
+                                  return DropdownMenuItem(
+                                    value: b.id,
+                                    child: Text(
+                                      b.name,
+                                      style: const TextStyle(
+                                        color: Colors.white,
+                                        fontSize: 11,
+                                        fontWeight: FontWeight.bold,
+                                      ),
+                                    ),
+                                  );
+                                }).toList(),
+                                onChanged: (val) {
+                                  if (val != null) {
+                                    setState(() => _selectedKioskBranchId = val);
+                                    _checkBranchIpAuth();
+                                  }
+                                },
+                              ),
+                            )
+                          else
+                            Container(
+                              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                              decoration: BoxDecoration(
+                                color: Colors.white.withValues(alpha: 0.1),
+                                borderRadius: BorderRadius.circular(10),
+                                border: Border.all(color: Colors.white24),
+                              ),
+                              child: Row(
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  const Icon(Icons.lock_rounded, size: 12, color: AppColors.accentCyan),
+                                  const SizedBox(width: 4),
+                                  Text(
+                                    allBranches.firstWhere(
+                                      (b) => b.id == _selectedKioskBranchId,
+                                      orElse: () => allBranches.first,
+                                    ).name,
+                                    style: const TextStyle(color: Colors.white, fontSize: 11, fontWeight: FontWeight.bold),
+                                  ),
+                                ],
+                              ),
                             ),
-                          ),
+                        ],
                       ],
                     ),
                     const SizedBox(height: 14),
@@ -778,25 +1333,44 @@ class _BiometricKioskScreenState extends ConsumerState<BiometricKioskScreen> {
                       ),
                     ),
                     const SizedBox(height: 2),
-                    Text(clockDateStr, style: const TextStyle(color: Colors.white70, fontSize: 12)),
+                    Text(
+                      clockDateStr,
+                      style: const TextStyle(
+                        color: Colors.white70,
+                        fontSize: 12,
+                      ),
+                    ),
                     const SizedBox(height: 10),
 
                     // شارة اعتماد راوتر الفرع النشط
                     Container(
-                      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 10,
+                        vertical: 4,
+                      ),
                       decoration: BoxDecoration(
                         color: AppColors.primary.withValues(alpha: 0.15),
                         borderRadius: BorderRadius.circular(20),
-                        border: Border.all(color: AppColors.primary.withValues(alpha: 0.4)),
+                        border: Border.all(
+                          color: AppColors.primary.withValues(alpha: 0.4),
+                        ),
                       ),
                       child: Row(
                         mainAxisSize: MainAxisSize.min,
                         children: [
-                          const Icon(Icons.verified_user_rounded, color: AppColors.primary, size: 14),
+                          const Icon(
+                            Icons.verified_user_rounded,
+                            color: AppColors.primary,
+                            size: 14,
+                          ),
                           const SizedBox(width: 6),
                           Text(
                             'شبكة راوتر الفرع معتمدة ومطابقة ✅ (${_currentDeviceIp ?? "IP"})',
-                            style: const TextStyle(color: Colors.white, fontSize: 11, fontWeight: FontWeight.bold),
+                            style: const TextStyle(
+                              color: Colors.white,
+                              fontSize: 11,
+                              fontWeight: FontWeight.bold,
+                            ),
                           ),
                         ],
                       ),
@@ -813,11 +1387,17 @@ class _BiometricKioskScreenState extends ConsumerState<BiometricKioskScreen> {
                   width: double.infinity,
                   padding: const EdgeInsets.all(16),
                   decoration: BoxDecoration(
-                    color: Theme.of(context).cardTheme.color ?? (isDark ? AppColors.darkSurface : Colors.white),
+                    color:
+                        Theme.of(context).cardTheme.color ??
+                        (isDark ? AppColors.darkSurface : Colors.white),
                     borderRadius: BorderRadius.circular(20),
                     border: Border.all(color: AppColors.primary, width: 1.5),
                     boxShadow: [
-                      BoxShadow(color: AppColors.primary.withValues(alpha: 0.08), blurRadius: 10, offset: const Offset(0, 4)),
+                      BoxShadow(
+                        color: AppColors.primary.withValues(alpha: 0.08),
+                        blurRadius: 10,
+                        offset: const Offset(0, 4),
+                      ),
                     ],
                   ),
                   child: Column(
@@ -829,25 +1409,57 @@ class _BiometricKioskScreenState extends ConsumerState<BiometricKioskScreen> {
                             height: 52,
                             decoration: BoxDecoration(
                               shape: BoxShape.circle,
-                              border: Border.all(color: AppColors.primary, width: 2),
+                              border: Border.all(
+                                color: AppColors.primary,
+                                width: 2,
+                              ),
                             ),
                             child: ClipOval(
-                              child: (matchedEmp.fullPhotoUrl != null && matchedEmp.fullPhotoUrl!.isNotEmpty)
+                              child:
+                                  (matchedEmp.fullPhotoUrl != null &&
+                                      matchedEmp.fullPhotoUrl!.isNotEmpty)
                                   ? CachedNetworkImage(
                                       imageUrl: matchedEmp.fullPhotoUrl!,
                                       fit: BoxFit.cover,
                                       placeholder: (_, __) => CircleAvatar(
-                                        backgroundColor: AppColors.primary.withValues(alpha: 0.15),
-                                        child: Text(matchedEmp.name.isNotEmpty ? matchedEmp.name[0] : 'U', style: const TextStyle(color: AppColors.primary, fontWeight: FontWeight.bold)),
+                                        backgroundColor: AppColors.primary
+                                            .withValues(alpha: 0.15),
+                                        child: Text(
+                                          matchedEmp.name.isNotEmpty
+                                              ? matchedEmp.name[0]
+                                              : 'U',
+                                          style: const TextStyle(
+                                            color: AppColors.primary,
+                                            fontWeight: FontWeight.bold,
+                                          ),
+                                        ),
                                       ),
                                       errorWidget: (_, __, ___) => CircleAvatar(
-                                        backgroundColor: AppColors.primary.withValues(alpha: 0.15),
-                                        child: Text(matchedEmp.name.isNotEmpty ? matchedEmp.name[0] : 'U', style: const TextStyle(color: AppColors.primary, fontWeight: FontWeight.bold)),
+                                        backgroundColor: AppColors.primary
+                                            .withValues(alpha: 0.15),
+                                        child: Text(
+                                          matchedEmp.name.isNotEmpty
+                                              ? matchedEmp.name[0]
+                                              : 'U',
+                                          style: const TextStyle(
+                                            color: AppColors.primary,
+                                            fontWeight: FontWeight.bold,
+                                          ),
+                                        ),
                                       ),
                                     )
                                   : CircleAvatar(
-                                      backgroundColor: AppColors.primary.withValues(alpha: 0.15),
-                                      child: Text(matchedEmp.name.isNotEmpty ? matchedEmp.name[0] : 'U', style: const TextStyle(color: AppColors.primary, fontWeight: FontWeight.bold)),
+                                      backgroundColor: AppColors.primary
+                                          .withValues(alpha: 0.15),
+                                      child: Text(
+                                        matchedEmp.name.isNotEmpty
+                                            ? matchedEmp.name[0]
+                                            : 'U',
+                                        style: const TextStyle(
+                                          color: AppColors.primary,
+                                          fontWeight: FontWeight.bold,
+                                        ),
+                                      ),
                                     ),
                             ),
                           ),
@@ -858,18 +1470,27 @@ class _BiometricKioskScreenState extends ConsumerState<BiometricKioskScreen> {
                               children: [
                                 Text(
                                   matchedEmp.name,
-                                  style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16),
+                                  style: const TextStyle(
+                                    fontWeight: FontWeight.bold,
+                                    fontSize: 16,
+                                  ),
                                 ),
                                 const SizedBox(height: 2),
                                 Text(
                                   '${matchedEmp.jobTitle} • كود: ${matchedEmp.code}',
-                                  style: const TextStyle(fontSize: 12, color: Colors.grey),
+                                  style: const TextStyle(
+                                    fontSize: 12,
+                                    color: Colors.grey,
+                                  ),
                                 ),
                               ],
                             ),
                           ),
                           IconButton(
-                            icon: const Icon(Icons.close_rounded, color: Colors.grey),
+                            icon: const Icon(
+                              Icons.close_rounded,
+                              color: Colors.grey,
+                            ),
                             onPressed: _onClear,
                           ),
                         ],
@@ -877,6 +1498,7 @@ class _BiometricKioskScreenState extends ConsumerState<BiometricKioskScreen> {
                       const SizedBox(height: 14),
 
                       // أزرار الحضور والانصراف والبريك
+                      // أزرار الحضور والانصراف والبريك (موثقة بالكامل بكاميرا الوجه والذكاء الاصطناعي)
                       Row(
                         children: [
                           if (!isShiftActive) ...[
@@ -884,20 +1506,34 @@ class _BiometricKioskScreenState extends ConsumerState<BiometricKioskScreen> {
                               child: ElevatedButton.icon(
                                 onPressed: _isPunching
                                     ? null
-                                    : () => _executeKioskPunch(
+                                    : () => _handlePunchWithFaceVerification(
                                           targetUser: matchedEmp,
                                           actionType: 'start_shift',
-                                          actionTitle: 'تم تسجيل الحضور وبدء الوردية 🟢',
+                                          actionTitle:
+                                              'تسجيل حضور وبدء الوردية 🟢',
                                           color: AppColors.primary,
                                         ),
                                 style: ElevatedButton.styleFrom(
                                   backgroundColor: AppColors.primary,
                                   foregroundColor: Colors.white,
-                                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-                                  padding: const EdgeInsets.symmetric(vertical: 12),
+                                  shape: RoundedRectangleBorder(
+                                    borderRadius: BorderRadius.circular(12),
+                                  ),
+                                  padding: const EdgeInsets.symmetric(
+                                    vertical: 12,
+                                  ),
                                 ),
-                                icon: const Icon(Icons.play_arrow_rounded, size: 20),
-                                label: const Text('تسجيل حضور (بدء)', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13)),
+                                icon: const Icon(
+                                  Icons.play_arrow_rounded,
+                                  size: 20,
+                                ),
+                                label: const Text(
+                                  'تسجيل حضور (بدء)',
+                                  style: TextStyle(
+                                    fontWeight: FontWeight.bold,
+                                    fontSize: 13,
+                                  ),
+                                ),
                               ),
                             ),
                           ] else ...[
@@ -905,21 +1541,44 @@ class _BiometricKioskScreenState extends ConsumerState<BiometricKioskScreen> {
                               child: OutlinedButton.icon(
                                 onPressed: _isPunching
                                     ? null
-                                    : () => _executeKioskPunch(
+                                    : () => _handlePunchWithFaceVerification(
                                           targetUser: matchedEmp,
-                                          actionType: isOnBreak ? 'break_end' : 'break_start',
-                                          actionTitle: isOnBreak ? 'تم استئناف الوردية وإنهاء الراحة ☕' : 'تم بدء استراحة البريك ⏸️',
+                                          actionType: isOnBreak
+                                              ? 'break_end'
+                                              : 'break_start',
+                                          actionTitle: isOnBreak
+                                              ? 'استئناف الوردية وإنهاء الراحة ☕'
+                                              : 'بدء استراحة البريك ⏸️',
                                           color: AppColors.warning,
                                         ),
                                 style: OutlinedButton.styleFrom(
-                                  side: const BorderSide(color: AppColors.warning, width: 1.5),
-                                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-                                  padding: const EdgeInsets.symmetric(vertical: 11),
+                                  side: const BorderSide(
+                                    color: AppColors.warning,
+                                    width: 1.5,
+                                  ),
+                                  shape: RoundedRectangleBorder(
+                                    borderRadius: BorderRadius.circular(12),
+                                  ),
+                                  padding: const EdgeInsets.symmetric(
+                                    vertical: 11,
+                                  ),
                                 ),
-                                icon: Icon(isOnBreak ? Icons.play_arrow_rounded : Icons.coffee_rounded, size: 18, color: AppColors.warning),
+                                icon: Icon(
+                                  isOnBreak
+                                      ? Icons.play_arrow_rounded
+                                      : Icons.coffee_rounded,
+                                  size: 18,
+                                  color: AppColors.warning,
+                                ),
                                 label: Text(
-                                  isOnBreak ? 'استئناف الوردية' : 'استراحة بريك',
-                                  style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 12, color: AppColors.warning),
+                                  isOnBreak
+                                      ? 'استئناف الوردية'
+                                      : 'استراحة بريك',
+                                  style: const TextStyle(
+                                    fontWeight: FontWeight.bold,
+                                    fontSize: 12,
+                                    color: AppColors.warning,
+                                  ),
                                 ),
                               ),
                             ),
@@ -928,20 +1587,31 @@ class _BiometricKioskScreenState extends ConsumerState<BiometricKioskScreen> {
                               child: ElevatedButton.icon(
                                 onPressed: _isPunching
                                     ? null
-                                    : () => _executeKioskPunch(
+                                    : () => _handlePunchWithFaceVerification(
                                           targetUser: matchedEmp,
                                           actionType: 'stop_shift',
-                                          actionTitle: 'تم توثيق الانصراف وإنهاء الوردية 🔴',
+                                          actionTitle:
+                                              'توثيق الانصراف وإنهاء الوردية 🔴',
                                           color: AppColors.danger,
                                         ),
                                 style: ElevatedButton.styleFrom(
                                   backgroundColor: AppColors.danger,
                                   foregroundColor: Colors.white,
-                                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-                                  padding: const EdgeInsets.symmetric(vertical: 11),
+                                  shape: RoundedRectangleBorder(
+                                    borderRadius: BorderRadius.circular(12),
+                                  ),
+                                  padding: const EdgeInsets.symmetric(
+                                    vertical: 11,
+                                  ),
                                 ),
                                 icon: const Icon(Icons.stop_rounded, size: 18),
-                                label: const Text('إنهاء الوردية', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 12)),
+                                label: const Text(
+                                  'إنهاء الوردية',
+                                  style: TextStyle(
+                                    fontWeight: FontWeight.bold,
+                                    fontSize: 12,
+                                  ),
+                                ),
                               ),
                             ),
                           ],
@@ -958,37 +1628,64 @@ class _BiometricKioskScreenState extends ConsumerState<BiometricKioskScreen> {
                 width: double.infinity,
                 padding: const EdgeInsets.all(16),
                 decoration: BoxDecoration(
-                  color: Theme.of(context).cardTheme.color ?? (isDark ? AppColors.darkSurface : Colors.white),
+                  color:
+                      Theme.of(context).cardTheme.color ??
+                      (isDark ? AppColors.darkSurface : Colors.white),
                   borderRadius: BorderRadius.circular(20),
-                  border: Border.all(color: isDark ? AppColors.darkBorder : const Color(0xFFE2E8F0)),
+                  border: Border.all(
+                    color: isDark
+                        ? AppColors.darkBorder
+                        : const Color(0xFFE2E8F0),
+                  ),
                 ),
                 child: Column(
                   children: [
                     // شاشة عرض الكود
                     Container(
                       width: double.infinity,
-                      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 16,
+                        vertical: 12,
+                      ),
                       decoration: BoxDecoration(
-                        color: isDark ? Colors.black26 : const Color(0xFFF8FAFC),
+                        color: isDark
+                            ? Colors.black26
+                            : const Color(0xFFF8FAFC),
                         borderRadius: BorderRadius.circular(14),
-                        border: Border.all(color: AppColors.primary.withValues(alpha: 0.3)),
+                        border: Border.all(
+                          color: AppColors.primary.withValues(alpha: 0.3),
+                        ),
                       ),
                       child: Row(
                         mainAxisAlignment: MainAxisAlignment.spaceBetween,
                         children: [
-                          const Icon(Icons.pin_rounded, color: AppColors.primary, size: 22),
+                          const Icon(
+                            Icons.pin_rounded,
+                            color: AppColors.primary,
+                            size: 22,
+                          ),
                           Text(
-                            _inputCode.isEmpty ? 'ادخل كود الموظف...' : _inputCode,
+                            _inputCode.isEmpty
+                                ? 'ادخل كود الموظف...'
+                                : _inputCode,
                             style: TextStyle(
                               fontSize: 20,
                               fontWeight: FontWeight.bold,
                               letterSpacing: _inputCode.isEmpty ? 0 : 4,
-                              color: _inputCode.isEmpty ? Colors.grey : (isDark ? Colors.white : const Color(0xFF0F172A)),
+                              color: _inputCode.isEmpty
+                                  ? Colors.grey
+                                  : (isDark
+                                        ? Colors.white
+                                        : const Color(0xFF0F172A)),
                             ),
                           ),
                           if (_inputCode.isNotEmpty)
                             IconButton(
-                              icon: const Icon(Icons.close_rounded, size: 18, color: Colors.grey),
+                              icon: const Icon(
+                                Icons.close_rounded,
+                                size: 18,
+                                color: Colors.grey,
+                              ),
                               onPressed: _onClear,
                             )
                           else
@@ -1009,11 +1706,31 @@ class _BiometricKioskScreenState extends ConsumerState<BiometricKioskScreen> {
                       crossAxisSpacing: 8,
                       children: [
                         ...['1', '2', '3', '4', '5', '6', '7', '8', '9'].map(
-                          (digit) => _buildKeypadButton(digit, () => _onKeypadTap(digit), isDark),
+                          (digit) => _buildKeypadButton(
+                            digit,
+                            () => _onKeypadTap(digit),
+                            isDark,
+                          ),
                         ),
-                        _buildKeypadActionButton('مسح', Icons.backspace_rounded, _onBackspace, isDark, color: AppColors.warning),
-                        _buildKeypadButton('0', () => _onKeypadTap('0'), isDark),
-                        _buildKeypadActionButton('تصفير', Icons.clear_all_rounded, _onClear, isDark, color: AppColors.danger),
+                        _buildKeypadActionButton(
+                          'مسح',
+                          Icons.backspace_rounded,
+                          _onBackspace,
+                          isDark,
+                          color: AppColors.warning,
+                        ),
+                        _buildKeypadButton(
+                          '0',
+                          () => _onKeypadTap('0'),
+                          isDark,
+                        ),
+                        _buildKeypadActionButton(
+                          'تصفير',
+                          Icons.clear_all_rounded,
+                          _onClear,
+                          isDark,
+                          color: AppColors.danger,
+                        ),
                       ],
                     ),
 
@@ -1026,16 +1743,31 @@ class _BiometricKioskScreenState extends ConsumerState<BiometricKioskScreen> {
                       child: OutlinedButton.icon(
                         onPressed: _handleFaceScanPunch,
                         style: OutlinedButton.styleFrom(
-                          side: const BorderSide(color: AppColors.primary, width: 1.5),
-                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
-                          backgroundColor: AppColors.primary.withValues(alpha: 0.05),
+                          side: const BorderSide(
+                            color: AppColors.primary,
+                            width: 1.5,
+                          ),
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(14),
+                          ),
+                          backgroundColor: AppColors.primary.withValues(
+                            alpha: 0.05,
+                          ),
                         ),
-                        icon: const Icon(Icons.camera_front_rounded, color: AppColors.primary, size: 22),
+                        icon: const Icon(
+                          Icons.camera_front_rounded,
+                          color: AppColors.primary,
+                          size: 22,
+                        ),
                         label: Text(
                           matchedEmp != null
                               ? 'التحقق ببصمة الوجه للموظف ${matchedEmp.name}'
                               : 'بصمة الوجه الذكية بالكاميرا (Zero-Touch)',
-                          style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13, color: AppColors.primary),
+                          style: const TextStyle(
+                            fontWeight: FontWeight.bold,
+                            fontSize: 13,
+                            color: AppColors.primary,
+                          ),
                         ),
                       ),
                     ),
@@ -1072,16 +1804,20 @@ class _BiometricKioskScreenState extends ConsumerState<BiometricKioskScreen> {
     );
   }
 
-  Widget _buildKeypadActionButton(String label, IconData icon, VoidCallback onTap, bool isDark, {required Color color}) {
+  Widget _buildKeypadActionButton(
+    String label,
+    IconData icon,
+    VoidCallback onTap,
+    bool isDark, {
+    required Color color,
+  }) {
     return Material(
       color: color.withValues(alpha: isDark ? 0.2 : 0.1),
       borderRadius: BorderRadius.circular(12),
       child: InkWell(
         onTap: onTap,
         borderRadius: BorderRadius.circular(12),
-        child: Center(
-          child: Icon(icon, color: color, size: 22),
-        ),
+        child: Center(child: Icon(icon, color: color, size: 22)),
       ),
     );
   }

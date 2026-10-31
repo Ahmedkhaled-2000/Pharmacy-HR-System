@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 import 'package:dio/dio.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
@@ -142,7 +143,12 @@ class AuthRepository {
     try {
       final code = await _storage.read(key: _keyUserCode);
       if (code == null || code.trim().isEmpty) return null;
-      final snapshot = await _employeeRepo.fetchEmployeeData(employeeCode: code.trim());
+      final snapshot = await _employeeRepo
+          .fetchEmployeeData(employeeCode: code.trim())
+          .timeout(
+            const Duration(seconds: 4),
+            onTimeout: () => throw TimeoutException('استجابة السيرفر تجاوزت المهلة المحددة'),
+          );
       if (snapshot.user.id.isNotEmpty) {
         await _storage.write(
           key: _keyCachedUserProfile,
